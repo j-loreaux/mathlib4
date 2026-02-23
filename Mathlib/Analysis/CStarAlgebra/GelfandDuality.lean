@@ -65,6 +65,85 @@ Gelfand transform, character space, C⋆-algebra
 
 @[expose] public section
 
+namespace StarAlgEquiv
+
+section NonUnital
+
+variable {R A₁ A₂ A₃ A₁' A₂' A₃' : Type*} [Monoid R]
+  [NonUnitalNonAssocSemiring A₁] [DistribMulAction R A₁] [Star A₁]
+  [NonUnitalNonAssocSemiring A₂] [DistribMulAction R A₂] [Star A₂]
+  [NonUnitalNonAssocSemiring A₃] [DistribMulAction R A₃] [Star A₃]
+  [NonUnitalNonAssocSemiring A₁'] [DistribMulAction R A₁'] [Star A₁']
+  [NonUnitalNonAssocSemiring A₂'] [DistribMulAction R A₂'] [Star A₂']
+  [NonUnitalNonAssocSemiring A₃'] [DistribMulAction R A₃'] [Star A₃']
+  (e : A₁ ≃⋆ₐ[R] A₂)
+
+/-- Reintrepret a star algebra equivalence as a non-unital star algebra homomorphism. -/
+@[simps]
+def toNonUnitalStarAlgHom : A₁ →⋆ₙₐ[R] A₂ where
+  toFun := e
+  map_add' := map_add e
+  map_zero' := map_zero e
+  map_mul' := map_mul e
+  map_smul' := map_smul e
+  map_star' := map_star e
+
+@[simp]
+lemma toNonUnitalStarAlgHom_comp (e₁ : A₁ ≃⋆ₐ[R] A₂) (e₂ : A₂ ≃⋆ₐ[R] A₃) :
+    e₂.toNonUnitalStarAlgHom.comp e₁.toNonUnitalStarAlgHom =
+      (e₁.trans e₂).toNonUnitalStarAlgHom := rfl
+
+/-- If `A₁` is equivalent to `A₁'` and `A₂` is equivalent to `A₂'`, then the type of maps
+`A₁ →ₐ[R] A₂` is equivalent to the type of maps `A₁' →ₐ[R] A₂'`. -/
+@[simps apply]
+def arrowCongr' (e₁ : A₁ ≃⋆ₐ[R] A₁') (e₂ : A₂ ≃⋆ₐ[R] A₂') :
+    (A₁ →⋆ₙₐ[R] A₂) ≃ (A₁' →⋆ₙₐ[R] A₂') where
+  toFun f := (e₂.toNonUnitalStarAlgHom.comp f).comp e₁.symm.toNonUnitalStarAlgHom
+  invFun f := (e₂.symm.toNonUnitalStarAlgHom.comp f).comp e₁.toNonUnitalStarAlgHom
+  left_inv f := by ext; simp
+  right_inv f := by ext; simp
+
+theorem arrowCongr'_comp (e₁ : A₁ ≃⋆ₐ[R] A₁') (e₂ : A₂ ≃⋆ₐ[R] A₂')
+    (e₃ : A₃ ≃⋆ₐ[R] A₃') (f : A₁ →⋆ₙₐ[R] A₂) (g : A₂ →⋆ₙₐ[R] A₃) :
+    arrowCongr' e₁ e₃ (g.comp f) = (arrowCongr' e₂ e₃ g).comp (arrowCongr' e₁ e₂ f) := by
+  ext
+  simp
+
+@[simp]
+theorem arrowCongr'_refl : arrowCongr' .refl .refl = Equiv.refl (A₁ →⋆ₙₐ[R] A₂) :=
+  rfl
+
+@[simp]
+theorem arrowCongr'_trans (e₁ : A₁ ≃⋆ₐ[R] A₂) (e₁' : A₁' ≃⋆ₐ[R] A₂')
+    (e₂ : A₂ ≃⋆ₐ[R] A₃) (e₂' : A₂' ≃⋆ₐ[R] A₃') :
+    arrowCongr' (e₁.trans e₂) (e₁'.trans e₂') = (arrowCongr' e₁ e₁').trans (arrowCongr' e₂ e₂') :=
+  rfl
+
+@[simp]
+theorem arrowCongr'_symm (e₁ : A₁ ≃⋆ₐ[R] A₁') (e₂ : A₂ ≃⋆ₐ[R] A₂') :
+    (arrowCongr' e₁ e₂).symm = arrowCongr' e₁.symm e₂.symm :=
+  rfl
+
+/-- Construct a star algebra equivalence from a pair of non-unital star algebra homomorphisms. -/
+@[simps]
+def ofHomInv' {R A B : Type*} [Monoid R]
+    [NonUnitalNonAssocSemiring A] [DistribMulAction R A] [Star A]
+    [NonUnitalNonAssocSemiring B] [DistribMulAction R B] [Star B]
+    (f : A →⋆ₙₐ[R] B) (g : B →⋆ₙₐ[R] A) (h₁ : g.comp f = .id R A) (h₂ : f.comp g = .id R B) :
+    A ≃⋆ₐ[R] B where
+  toFun := f
+  invFun := g
+  left_inv x := congr($h₁ x)
+  right_inv x := congr($h₂ x)
+  map_mul' := map_mul f
+  map_add' := map_add f
+  map_star' := map_star f
+  map_smul' := map_smul f
+
+end NonUnital
+
+end StarAlgEquiv
+
 
 open WeakDual
 
@@ -198,92 +277,98 @@ end ComplexCStarAlgebra
 
 section NonUnitalCStarAlgebra
 
-section Functions
-
-variable {X R : Type*} [TopologicalSpace X] [NormedRing R] [IsDomain R]
-
--- A better way to do this would be to prove that the norm of a bounded
--- continuous function agrees with the norm of the real-valued function where
--- you compose pointwise with the norm. That should simplify the argument a
--- bit I think, at the cost of developing more API (which is probably worthwhile).
-
-open BoundedContinuousFunction in
-/-- If the product of bounded continuous functions is zero, then the norm of their sum is the
-maximum of their norms. -/
-lemma BoundedContinuousFunction.norm_add_eq_max {f g : X →ᵇ R} (h : f * g = 0) :
-    ‖f + g‖ = max ‖f‖ ‖g‖ := by
-  have hfg : ∀ x, f x = 0 ∨ g x = 0 := by
-    simpa [DFunLike.ext_iff, mul_eq_zero] using h
-  have hfg' (x : X) : ‖(f + g) x‖ = max ‖f x‖ ‖g x‖ := by
-    obtain (h | h) := hfg x <;> simp [h]
-  apply le_antisymm
-  · rw [norm_le (by positivity)]
-    intro x
-    rw [hfg']
-    apply max_le <;> exact norm_coe_le_norm _ x |>.trans (by simp)
-  · apply max_le
-    all_goals
-      rw [norm_le (by positivity)]
-      intro x
-      grw [← (f + g).norm_coe_le_norm x, hfg']
-      simp
-
-open BoundedContinuousFunction in
-lemma ContinuousMap.norm_add_eq_max [CompactSpace X] {f g : C(X, R)} (h : f * g = 0) :
-    ‖f + g‖ = max ‖f‖ ‖g‖ := by
-  replace h : mkOfCompact f * mkOfCompact g = 0 := by ext x; simpa using congr($h x)
-  simpa using BoundedContinuousFunction.norm_add_eq_max h
-
-end Functions
-
-variable {A : Type*} [NonUnitalCommCStarAlgebra A]
-
-open scoped CStarAlgebra in
-open Unitization in
-lemma CommCStarAlgebra.norm_add_eq {A : Type*} [NonUnitalCommCStarAlgebra A]
-    {a b : A} (h : a * b = 0) : ‖a + b‖ = max ‖a‖ ‖b‖ := by
-  let f := gelfandStarTransform A⁺¹ ∘ inrNonUnitalStarAlgHom ℂ A
-  have hf : Isometry f := gelfandTransform_isometry _ |>.comp isometry_inr
-  have h0 : f 0 = 0 := by simp [f]
-  simp_rw [← hf.norm_map_of_map_zero h0, show f (a + b) = f a + f b by simp [f]]
-  exact ContinuousMap.norm_add_eq_max <| by simpa [f] using congr(f $h)
-
-open NonUnitalStarAlgebra in
-lemma IsSelfAdjoint.norm_add_eq {A : Type*} [NonUnitalCStarAlgebra A]
-    {a b : A} (hab : a * b = 0) (ha : IsSelfAdjoint a) (hb : IsSelfAdjoint b) :
-    ‖a + b‖ = max ‖a‖ ‖b‖ := by
-  let S : NonUnitalStarSubalgebra ℂ A := (adjoin ℂ {a, b}).topologicalClosure
-  have hS : IsClosed (S : Set A) := (adjoin ℂ {a, b}).isClosed_topologicalClosure
-  have hab' : a * b = b * a := by
-    rw [hab, eq_comm]; simpa [ha.star_eq, hb.star_eq] using congr(star $hab)
-  let _ : NonUnitalCommRing (adjoin ℂ {a, b}) :=
-    adjoinNonUnitalCommRingOfComm ℂ (by grind) (by grind [IsSelfAdjoint.star_eq])
-  let _ : NonUnitalCommRing S := (adjoin ℂ {a, b}).nonUnitalCommRingTopologicalClosure mul_comm
-  let _ : NonUnitalCommCStarAlgebra S := { }
-  let c : S := ⟨a, subset_closure <| subset_adjoin _ _ <| by grind⟩
-  let d : S := ⟨b, subset_closure <| subset_adjoin _ _ <| by grind⟩
-  exact CommCStarAlgebra.norm_add_eq (a := c) (b := d) (h := by ext; simpa)
-
-#check IsMulCommutative
-
 /-- The element of `WeakDual.characterSpace` on `Unitization 𝕜 A` corresponding to the
 algebra homomorphism consisting of projection onto the scalar part.
 
 When `A` is a C⋆-algebra composing the inclusion map `A → A⁺¹` with the Gelfand transform
 `A⁺¹ → C(characterSpace ℂ A⁺¹, ℂ)`, is an injective non-unital star homomorphism whose range is
 precisely kernel of the evaluation map at this point. -/
-noncomputable def CharacterSpace.pt {𝕜 A : Type*} [NontriviallyNormedField 𝕜] [CompleteSpace 𝕜]
+noncomputable def CharacterSpace.pt (𝕜 A : Type*) [NontriviallyNormedField 𝕜] [CompleteSpace 𝕜]
     [NonUnitalNormedRing A] [CompleteSpace A] [NormedSpace 𝕜 A]
     [IsScalarTower 𝕜 A A] [SMulCommClass 𝕜 A A] [RegularNormedAlgebra 𝕜 A] :
     characterSpace 𝕜 (Unitization 𝕜 A) :=
   CharacterSpace.equivAlgHom.symm <| Unitization.fstHom 𝕜 A
 
+@[simps!]
+def _root_.NonUnitalAlgHom.toStrongDual {𝕜 A : Type*} [NontriviallyNormedField 𝕜]
+    [NonUnitalNormedRing A] [NormedSpace 𝕜 A] [IsScalarTower 𝕜 A A] [SMulCommClass 𝕜 A A]
+    [CompleteSpace A] [CompleteSpace 𝕜] [RegularNormedAlgebra 𝕜 A] (φ : A →ₙₐ[𝕜] 𝕜) :
+    StrongDual 𝕜 A where
+  toLinearMap := (φ : A →ₗ[𝕜] 𝕜)
+  cont := by
+    convert map_continuous (Unitization.lift φ) |>.comp Unitization.continuous_inr
+    simp [Function.comp_def]
+
+@[simps]
+def WeakDual.characterSpace.equivNonUnitalAlgHomSubtype (𝕜 A : Type*) [NontriviallyNormedField 𝕜]
+    [NonUnitalNormedRing A] [NormedSpace 𝕜 A] [IsScalarTower 𝕜 A A] [SMulCommClass 𝕜 A A]
+    [CompleteSpace A] [CompleteSpace 𝕜] [RegularNormedAlgebra 𝕜 A] :
+    characterSpace 𝕜 A ≃ {φ : A →ₙₐ[𝕜] 𝕜 // φ ≠ 0} where
+  toFun φ :=
+    { val := CharacterSpace.toNonUnitalAlgHom φ
+      property := by simpa [DFunLike.ext'_iff] using φ.prop.1 }
+  invFun φ :=
+    ⟨φ.val.toStrongDual.toWeakDual, by simpa [DFunLike.ext_iff] using φ.prop, map_mul φ.val⟩
+  left_inv φ := by ext; rfl
+  right_inv φ := by ext; rfl
+
+lemma Unitization.lift_zero {R A : Type*} [CommSemiring R] [NonUnitalSemiring A] [Module R A]
+    [SMulCommClass R A A] [IsScalarTower R A A] {C : Type*} [Semiring C] [Algebra R C] :
+    Unitization.lift (0 : A →ₙₐ[R] C) = (Algebra.ofId R C).comp (Unitization.fstHom R A) := by
+  ext x
+  change (0 : A →ₙₐ[R] C).toAlgHom x = algebraMap R C (x : Unitization R A).fst -- wut?
+  simp
+
+open Unitization in
+noncomputable def CharacterSpace.equivSubtypeNePt {𝕜 A : Type*} [NontriviallyNormedField 𝕜]
+    [NonUnitalNormedRing A] [NormedSpace 𝕜 A] [IsScalarTower 𝕜 A A] [SMulCommClass 𝕜 A A]
+    [CompleteSpace A] [CompleteSpace 𝕜] [RegularNormedAlgebra 𝕜 A] :
+    characterSpace 𝕜 A ≃ {φ : characterSpace 𝕜 (Unitization 𝕜 A) // φ ≠ CharacterSpace.pt 𝕜 A} :=
+  letI e₁ := characterSpace.equivNonUnitalAlgHomSubtype 𝕜 A
+  letI e₂ : {φ : A →ₙₐ[𝕜] 𝕜 // φ ≠ 0} ≃ {φ : Unitization 𝕜 A →ₐ[𝕜] 𝕜 // φ ≠ fstHom 𝕜 A} :=
+    lift.subtypeEquiv fun φ ↦ by
+      simp only [ne_eq, not_iff_not]
+      constructor
+      · rintro rfl
+        simp only [Unitization.lift_zero, Algebra.ofId_self, AlgHom.id_comp]
+      · intro hφ
+        simpa [-lift_apply] using congr(lift.symm $hφ)
+  letI e₃ : {φ : Unitization 𝕜 A →ₐ[𝕜] 𝕜 // φ ≠ fstHom 𝕜 A} ≃
+      {φ : characterSpace 𝕜 (Unitization 𝕜 A) // φ ≠ CharacterSpace.pt 𝕜 A} :=
+    CharacterSpace.equivAlgHom.symm.subtypeEquiv fun φ ↦ by
+      simp only [ne_eq, not_iff_not]
+      constructor
+      · rintro rfl
+        rfl
+      · intro hφ
+        simpa [CharacterSpace.pt] using congr(CharacterSpace.equivAlgHom $hφ)
+  (e₁.trans e₂).trans e₃
+
+noncomputable def CharacterSpace.homeomorphSubtypeNePt {𝕜 A : Type*} [NontriviallyNormedField 𝕜]
+    [NonUnitalNormedRing A] [NormedSpace 𝕜 A] [IsScalarTower 𝕜 A A] [SMulCommClass 𝕜 A A]
+    [CompleteSpace A] [CompleteSpace 𝕜] [RegularNormedAlgebra 𝕜 A] :
+    characterSpace 𝕜 A ≃ₜ
+      {φ : characterSpace 𝕜 (Unitization 𝕜 A) // φ ≠ CharacterSpace.pt 𝕜 A} where
+  toEquiv := CharacterSpace.equivSubtypeNePt
+  continuous_toFun := by
+    rw [continuous_induced_rng, continuous_induced_rng]
+    apply WeakDual.continuous_of_continuous_eval fun a ↦ ?_
+    induction a using Unitization.ind with
+    | inl_add_inr r a =>
+      convert_to Continuous fun φ : characterSpace 𝕜 A ↦ r + φ a
+      · ext φ
+        simp [equivSubtypeNePt]
+      · exact continuous_const.add <| (eval_continuous a).comp continuous_subtype_val
+  continuous_invFun := by
+    rw [continuous_induced_rng]
+    apply WeakDual.continuous_of_continuous_eval fun a ↦ ?_
+    convert ((eval_continuous _).comp continuous_subtype_val).comp continuous_subtype_val
+
 open CStarAlgebra Unitization in
 example {A : Type*} [NonUnitalCommCStarAlgebra A] : False := by
   let g := gelfandStarTransform A⁺¹
   let i := inrNonUnitalStarAlgHom ℂ A
-
-
+  have φ : A →⋆ₙₐ[ℂ] C(characterSpace ℂ A⁺¹, ℂ) := StarAlgEquiv.arrowCongr' .refl g i
   sorry
 
 end NonUnitalCStarAlgebra
