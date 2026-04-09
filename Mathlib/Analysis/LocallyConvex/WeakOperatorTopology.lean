@@ -69,11 +69,12 @@ notation:25 E " →WOT[" 𝕜 "] " F => ContinuousLinearMapWOT (RingHom.id 𝕜)
 
 namespace ContinuousLinearMapWOT
 
-variable {𝕜₁ 𝕜₂ : Type*} [NormedField 𝕜₁] [NormedField 𝕜₂]
+variable {𝕜₁ 𝕜₂ S : Type*} [NormedField 𝕜₁] [NormedField 𝕜₂]
   {σ : 𝕜₁ →+* 𝕜₂}
   {E F : Type*}
   [AddCommGroup E] [TopologicalSpace E] [Module 𝕜₁ E]
   [AddCommGroup F] [TopologicalSpace F] [Module 𝕜₂ F]
+  [Semiring S] [Module S F] [SMulCommClass 𝕜₂ S F] [ContinuousConstSMul S F]
 
 local notation X "⋆" => StrongDual 𝕜₂ X
 
@@ -106,9 +107,19 @@ instance instAddCommGroup [IsTopologicalAddGroup F] : AddCommGroup (E →SWOT[σ
   inferInstanceAs <| AddCommGroup (E →SL[σ] F)
 
 unseal ContinuousLinearMapWOT in
-instance instModule [IsTopologicalAddGroup F] [ContinuousConstSMul 𝕜₂ F] :
-    Module 𝕜₂ (E →SWOT[σ] F) :=
-  inferInstanceAs <| Module 𝕜₂ (E →SL[σ] F)
+instance instModule [IsTopologicalAddGroup F] :
+    Module S (E →SWOT[σ] F) :=
+  inferInstanceAs <| Module S (E →SL[σ] F)
+
+instance instIsScalarTower [SMul S 𝕜₂] [IsScalarTower S 𝕜₂ F]
+      [IsTopologicalAddGroup F] [ContinuousConstSMul 𝕜₂ F] :
+    IsScalarTower S 𝕜₂ (E →SWOT[σ] F) :=
+  inferInstanceAs <| IsScalarTower S 𝕜₂ (E →SL[σ] F)
+
+instance instSMulCommClass [SMul S 𝕜₂] [SMulCommClass S 𝕜₂ F]
+      [IsTopologicalAddGroup F] [ContinuousConstSMul 𝕜₂ F] :
+    SMulCommClass S 𝕜₂ (E →SWOT[σ] F) :=
+  inferInstanceAs <| SMulCommClass S 𝕜₂ (E →SL[σ] F)
 
 variable [IsTopologicalAddGroup F] [ContinuousConstSMul 𝕜₂ F]
 
@@ -140,7 +151,7 @@ lemma _root_.ContinuousLinearMap.toCLM_toWOT (A : E →SL[σ] F) : A.toWOT.toCLM
 lemma toWOT_toCLM (A : E →SWOT[σ] F) : A.toCLM.toWOT = A := rfl
 
 instance instFunLike : FunLike (E →SWOT[σ] F) E F where
-  coe f := ((ContinuousLinearMap.toWOT).symm f : E → F)
+  coe f := f.toCLM
   coe_injective' := by intro; simp
 
 instance instContinuousLinearMapClass : ContinuousSemilinearMapClass (E →SWOT[σ] F) σ E F where
@@ -186,7 +197,7 @@ unseal ContinuousLinearMapWOT in
   simp only [DFunLike.coe]; rfl
 
 unseal ContinuousLinearMapWOT in
-@[simp] lemma smul_apply {f : E →SWOT[σ] F} (c : 𝕜₂) (x : E) : (c • f) x = c • (f x) := by
+@[simp] lemma smul_apply {f : E →SWOT[σ] F} (c : S) (x : E) : (c • f) x = c • (f x) := by
   simp only [DFunLike.coe]; rfl
 
 end Basic
@@ -232,8 +243,10 @@ lemma continuous_of_dual_apply_continuous {α : Type*} [TopologicalSpace α] {g 
     (h : ∀ x (y : F⋆), Continuous fun a => y (g a x)) : Continuous g :=
   continuous_induced_rng.2 (continuous_pi_iff.mpr fun p => h p.1 p.2)
 
+@[fun_prop]
 lemma isInducing_inducingFn : IsInducing (inducingFn σ E F) := ⟨rfl⟩
 
+@[fun_prop]
 lemma isEmbedding_inducingFn [SeparatingDual 𝕜₂ F] : IsEmbedding (inducingFn σ E F) := by
   refine Function.Injective.isEmbedding_induced fun A B hAB => ?_
   rw [ContinuousLinearMapWOT.ext_dual_iff]
@@ -256,7 +269,18 @@ instance instT3Space [SeparatingDual 𝕜₂ F] : T3Space (E →SWOT[σ] F) :=
 
 instance instContinuousAdd : ContinuousAdd (E →SWOT[σ] F) := .induced (inducingFn σ E F)
 instance instContinuousNeg : ContinuousNeg (E →SWOT[σ] F) := .induced (inducingFn σ E F)
-instance instContinuousSMul : ContinuousSMul 𝕜₂ (E →SWOT[σ] F) := .induced (inducingFn σ E F)
+
+instance [SMul S 𝕜₂] [IsScalarTower S 𝕜₂ 𝕜₂] [IsScalarTower S 𝕜₂ F] :
+    ContinuousConstSMul S (F →WOT[𝕜₂] F) where
+  continuous_const_smul c := by
+    apply continuous_of_dual_apply_continuous fun _ _ ↦ ?_
+    simp only [smul_apply, ContinuousLinearMap.map_smul_of_tower]
+    exact continuous_const_smul c |>.comp <| continuous_dual_apply ..
+
+omit [ContinuousConstSMul S F] [ContinuousConstSMul 𝕜₂ F] in
+instance instContinuousSMul [Module S 𝕜₂] [IsScalarTower S 𝕜₂ F] [IsScalarTower S 𝕜₂ 𝕜₂]
+    [TopologicalSpace S] [ContinuousSMul S 𝕜₂] :
+  ContinuousSMul S (E →SWOT[σ] F) := .induced <| (inducingFn σ E F).restrictScalars S
 
 #adaptation_note /-- 2025-03-29 https://github.com/leanprover/lean4/issues/7717 Needed to add this instance explicitly to avoid a
 limitation with parent instance inference. TODO(kmill): fix this. -/
@@ -333,10 +357,13 @@ variable {𝕜₁ 𝕜₂ 𝕜₃ 𝕜₄ : Type*} {E F G H : Type*}
     {σ₂₃ : 𝕜₂ →+* 𝕜₃} {σ₂₄ : 𝕜₂ →+* 𝕜₄} {σ₃₄ : 𝕜₃ →+* 𝕜₄}
     [RingHomCompTriple σ₁₂ σ₂₃ σ₁₃] [RingHomCompTriple σ₁₃ σ₃₄ σ₁₄]
     [RingHomCompTriple σ₁₂ σ₂₄ σ₁₄] [RingHomCompTriple σ₂₃ σ₃₄ σ₂₄]
-[AddCommGroup E] [TopologicalSpace E] [Module 𝕜₁ E]
-[AddCommGroup F] [TopologicalSpace F] [Module 𝕜₂ F] [IsTopologicalAddGroup F] [ContinuousConstSMul 𝕜₂ F]
-[AddCommGroup G] [TopologicalSpace G] [Module 𝕜₃ G] [IsTopologicalAddGroup G] [ContinuousConstSMul 𝕜₃ G]
-[AddCommGroup H] [TopologicalSpace H] [Module 𝕜₄ H] [IsTopologicalAddGroup H] [ContinuousConstSMul 𝕜₄ H]
+    [AddCommGroup E] [TopologicalSpace E] [Module 𝕜₁ E]
+    [AddCommGroup F] [TopologicalSpace F] [Module 𝕜₂ F]
+    [AddCommGroup G] [TopologicalSpace G] [Module 𝕜₃ G]
+    [AddCommGroup H] [TopologicalSpace H] [Module 𝕜₄ H]
+    [IsTopologicalAddGroup F] [ContinuousConstSMul 𝕜₂ F]
+    [IsTopologicalAddGroup G] [ContinuousConstSMul 𝕜₃ G]
+    [IsTopologicalAddGroup H] [ContinuousConstSMul 𝕜₄ H]
 
 variable (𝕜₂ F) in
 /-- The identity as a continuous linear map on the type synonym equipped with the weak operator
@@ -431,15 +458,26 @@ instance : IntCast (F →WOT[𝕜₂] F) where
 
 lemma mul_eq_comp (f g : F →WOT[𝕜₂] F) : f * g = f.comp g := rfl
 
+@[simp]
 lemma toCLM_mul (f g : F →WOT[𝕜₂] F) : (f * g).toCLM = f.toCLM * g.toCLM := rfl
 
+@[simp]
 lemma toCLM_one : (1 : F →WOT[𝕜₂] F).toCLM = 1 := rfl
 
+@[simp]
 lemma toCLM_pow (f : F →WOT[𝕜₂] F) (n : ℕ) : (f ^ n).toCLM = f.toCLM ^ n := rfl
 
+@[simp]
 lemma toCLM_natCast (n : ℕ) : (n : F →WOT[𝕜₂] F).toCLM = n := rfl
 
+@[simp]
 lemma toCLM_intCast (n : ℤ) : (n : F →WOT[𝕜₂] F).toCLM = n := rfl
+
+@[simp]
+lemma toCLM_smul {S : Type*} [CommSemiring S] [Module S F] [SMulCommClass 𝕜₂ S F] [SMul S 𝕜₂]
+    [IsScalarTower S 𝕜₂ F] [IsScalarTower S 𝕜₂ 𝕜₂] [ContinuousConstSMul S F] (s : S)
+    (f : F →WOT[𝕜₂] F) : (s • f).toCLM  = s • f.toCLM := by
+  ext; simp
 
 instance : Ring (F →WOT[𝕜₂] F) :=
   fast_instance% Function.Injective.ring (toCLM : (F →WOT[𝕜₂] F) → F →L[𝕜₂] F) toCLM.injective
@@ -451,6 +489,12 @@ instance : IsSemitopologicalRing (F →WOT[𝕜₂] F) where
   continuous_mul_const {_} := by simp_rw [mul_eq_comp]; fun_prop
 
 instance {S : Type*} [CommSemiring S] [Module S F] [SMulCommClass 𝕜₂ S F] [SMul S 𝕜₂]
-    [IsScalarTower S 𝕜₂ F] [ContinuousConstSMul S F] : Algebra S (F →WOT[𝕜₂] F) := sorry
+    [IsScalarTower S 𝕜₂ F] [IsScalarTower S 𝕜₂ 𝕜₂] [ContinuousConstSMul S F] :
+    Algebra S (F →WOT[𝕜₂] F) :=
+  Algebra.ofModule ?_ ?_
+where finally
+  all_goals exact (fun _ _ _ ↦ ext <| by simp [← toCLM_apply])
+
+
 
 end ContinuousLinearMapWOT
