@@ -316,6 +316,17 @@ theorem mul_star_self_pos [Nontrivial R] {x : R} (hx : IsRegular x) : 0 < x * st
 
 end NonUnitalSemiring
 
+section NonUnitalRing
+
+instance {R : Type*} [NonUnitalRing R] [LinearOrder R] [StarRing R] [StarOrderedRing R] :
+    TrivialStar R where
+  star_trivial r := by
+    obtain (hr | hr) : 0 ≤ r ∨ 0 ≤ -r := by grind
+    · exact hr.star_eq
+    · simpa using hr.star_eq
+
+end NonUnitalRing
+
 section Semiring
 variable [Semiring R] [PartialOrder R] [StarRing R] [StarOrderedRing R]
 
@@ -471,13 +482,6 @@ theorem le_of_mul_eq_left (hp : IsStarProjection p) (hq : IsStarProjection q)
 /-- A star projection `p` is less than or equal to a star projection `q` when `q * p = p`. -/
 theorem le_of_mul_eq_right (hp : IsStarProjection p) (hq : IsStarProjection q)
     (hpq : q * p = p) : p ≤ q := sub_nonneg.mp (hp.sub_of_mul_eq_right hq hpq).nonneg
-
-instance {R : Type*} [NonUnitalRing R] [LinearOrder R] [StarRing R] [StarOrderedRing R] :
-    TrivialStar R where
-  star_trivial r := by
-    obtain (hr | hr) : 0 ≤ r ∨ 0 ≤ -r := by grind
-    · exact hr.star_eq
-    · simpa using hr.star_eq
 
 end NonUnitalRing
 
