@@ -11,6 +11,7 @@ public import Mathlib.Analysis.CStarAlgebra.ContinuousFunctionalCalculus.Unique
 public import Mathlib.Analysis.CStarAlgebra.Unitization
 public import Mathlib.Analysis.Normed.Algebra.Spectrum
 public import Mathlib.Analysis.RCLike.Lemmas
+public import Mathlib.Tactic.CFCPull.Attr
 
 /-! # Instances of the continuous functional calculus
 
@@ -349,6 +350,7 @@ lemma cfcHom_real_eq_restrict {a : A} (ha : IsSelfAdjoint a) :
         (cfcHom ha.isStarNormal) (f := Complex.reCLM) :=
   ha.spectrumRestricts.cfcHom_eq_restrict _ ha ha.isStarNormal
 
+@[cfc_pull]
 lemma cfc_real_eq_complex {a : A} (f : ℝ → ℝ) (ha : IsSelfAdjoint a := by cfc_tac) :
     cfc f a = cfc (fun x ↦ f x.re : ℂ → ℂ) a := by
   exact ha.spectrumRestricts.cfc_eq_restrict (f := Complex.reCLM)
@@ -376,6 +378,7 @@ lemma cfcₙHom_real_eq_restrict {a : A} (ha : IsSelfAdjoint a) :
       (R := ℝ) (S := ℂ) (f := Complex.reCLM) :=
   ha.quasispectrumRestricts.cfcₙHom_eq_restrict _ ha ha.isStarNormal
 
+@[cfc_pull]
 lemma cfcₙ_real_eq_complex {a : A} (f : ℝ → ℝ) (ha : IsSelfAdjoint a := by cfc_tac) :
     cfcₙ f a = cfcₙ (fun x ↦ f x.re : ℂ → ℂ) a := by
   exact ha.quasispectrumRestricts.cfcₙ_eq_restrict (f := Complex.reCLM)
@@ -406,6 +409,7 @@ lemma cfcHom_nnreal_eq_restrict {a : A} (ha : 0 ≤ a) :
       (cfcHom (IsSelfAdjoint.of_nonneg ha)) := by
   apply (SpectrumRestricts.nnreal_of_nonneg ha).cfcHom_eq_restrict _
 
+@[cfc_pull]
 lemma cfc_nnreal_eq_real (f : ℝ≥0 → ℝ≥0) (a : A) (ha : 0 ≤ a := by cfc_tac) :
     cfc f a = cfc (fun x ↦ f x.toNNReal : ℝ → ℝ) a := by
   apply (SpectrumRestricts.nnreal_of_nonneg ha).cfc_eq_restrict _
@@ -433,6 +437,7 @@ lemma cfcₙHom_nnreal_eq_restrict {a : A} (ha : 0 ≤ a) :
       (cfcₙHom (IsSelfAdjoint.of_nonneg ha)) := by
   apply (QuasispectrumRestricts.nnreal_of_nonneg ha).cfcₙHom_eq_restrict _
 
+@[cfc_pull]
 lemma cfcₙ_nnreal_eq_real (f : ℝ≥0 → ℝ≥0) (a : A) (ha : 0 ≤ a := by cfc_tac) :
     cfcₙ f a = cfcₙ (fun x ↦ f x.toNNReal : ℝ → ℝ) a := by
   apply (QuasispectrumRestricts.nnreal_of_nonneg ha).cfcₙ_eq_restrict _

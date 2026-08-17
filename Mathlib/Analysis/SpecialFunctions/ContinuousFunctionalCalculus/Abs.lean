@@ -10,6 +10,7 @@ public import Mathlib.Analysis.SpecialFunctions.ContinuousFunctionalCalculus.Pos
 public import Mathlib.Analysis.CStarAlgebra.ContinuousFunctionalCalculus.Isometric
 import Mathlib.Analysis.CStarAlgebra.ContinuousFunctionalCalculus.Commute
 import Mathlib.Analysis.SpecialFunctions.ContinuousFunctionalCalculus.Rpow.Isometric
+public import Mathlib.Tactic.CFCPull.Attr
 
 
 /-!
@@ -44,6 +45,9 @@ variable [NonUnitalRing A] [StarRing A] [TopologicalSpace A]
 
 /-- The absolute value defined via the non-unital continuous functional calculus. -/
 noncomputable def abs (a : A) := sqrt (star a * a)
+
+@[cfc_pull]
+lemma abs_def (a : A) : abs a = cfcₙ NNReal.sqrt (star a * a) := rfl
 
 @[simp, grind =]
 lemma abs_neg (a : A) : abs (-a) = abs a := by

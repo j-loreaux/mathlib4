@@ -6,6 +6,7 @@ Authors: Jireh Loreaux
 module
 
 public import Mathlib.Analysis.CStarAlgebra.ContinuousFunctionalCalculus.Unique
+public import Mathlib.Tactic.CFCPull.Attr
 public import Mathlib.Topology.ContinuousMap.ContinuousSqrt
 public import Mathlib.Topology.ContinuousMap.StoneWeierstrass
 
@@ -38,8 +39,10 @@ end CStarAlgebra
 
 namespace CFC
 
+@[cfc_pull]
 lemma posPart_def (a : A) : a⁺ = cfcₙ (·⁺ : ℝ → ℝ) a := rfl
 
+@[cfc_pull]
 lemma negPart_def (a : A) : a⁻ = cfcₙ (·⁻ : ℝ → ℝ) a := rfl
 
 @[simp]

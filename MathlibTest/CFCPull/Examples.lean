@@ -9,6 +9,10 @@ public import Mathlib.Tactic.CFCPull
 public import Mathlib.Analysis.CStarAlgebra.Classes
 public import Mathlib.Analysis.CStarAlgebra.ContinuousFunctionalCalculus.Isometric
 public import Mathlib.Analysis.CStarAlgebra.ContinuousFunctionalCalculus.Order
+public import Mathlib.Analysis.SpecialFunctions.ContinuousFunctionalCalculus.Abs
+public import Mathlib.Analysis.SpecialFunctions.ContinuousFunctionalCalculus.ExpLog.Basic
+public import Mathlib.Analysis.SpecialFunctions.ContinuousFunctionalCalculus.PosPart.Basic
+public import Mathlib.Analysis.SpecialFunctions.ContinuousFunctionalCalculus.Rpow.Basic
 public import Mathlib.Analysis.SpecialFunctions.Pow.Continuity
 public import Mathlib.Tactic.Linarith
 

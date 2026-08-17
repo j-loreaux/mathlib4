@@ -7286,7 +7286,6 @@ public import Mathlib.Tactic.CFCPull
 public import Mathlib.Tactic.CFCPull.Attr
 public import Mathlib.Tactic.CFCPull.Core
 public import Mathlib.Tactic.CFCPull.Frontend
-public import Mathlib.Tactic.CFCPull.Lemmas
 public import Mathlib.Tactic.CancelDenoms
 public import Mathlib.Tactic.CancelDenoms.Core
 public import Mathlib.Tactic.Cases

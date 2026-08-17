@@ -8,7 +8,6 @@ module
 public import Mathlib.Tactic.CFCPull.Attr
 public import Mathlib.Tactic.CFCPull.Core
 public import Mathlib.Tactic.CFCPull.Frontend
-public import Mathlib.Tactic.CFCPull.Lemmas
 
 /-!
 # The `cfc_pull` tactic

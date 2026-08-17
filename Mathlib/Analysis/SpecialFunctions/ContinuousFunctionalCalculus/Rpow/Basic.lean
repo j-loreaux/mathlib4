@@ -12,6 +12,7 @@ public import Mathlib.Analysis.CStarAlgebra.ContinuousFunctionalCalculus.Unique
 public import Mathlib.Analysis.SpecialFunctions.ContinuousFunctionalCalculus.PosPart.Basic
 public import Mathlib.Analysis.SpecialFunctions.Pow.Continuity
 public import Mathlib.Analysis.SpecialFunctions.Pow.Real
+public import Mathlib.Tactic.CFCPull.Attr
 public import Mathlib.Topology.ContinuousMap.ContinuousSqrt
 
 /-!
@@ -102,6 +103,7 @@ lemma nnrpow_nonneg {a : A} {x : ℝ≥0} : 0 ≤ a ^ x := cfcₙ_predicate _ a
 
 grind_pattern nnrpow_nonneg => NonnegSpectrumClass ℝ A, a ^ x
 
+@[cfc_pull]
 lemma nnrpow_def {a : A} {y : ℝ≥0} : a ^ y = cfcₙ (NNReal.nnrpow · y) a := rfl
 
 lemma nnrpow_eq_cfcₙ_real [T2Space A] [IsSemitopologicalRing A] (a : A)
@@ -235,6 +237,9 @@ section sqrt
 /-- Square roots of operators, based on the non-unital continuous functional calculus. -/
 noncomputable def sqrt (a : A) : A := cfcₙ NNReal.sqrt a
 
+@[cfc_pull]
+lemma sqrt_def (a : A) : sqrt a = cfcₙ NNReal.sqrt a := rfl
+
 @[simp]
 lemma sqrt_nonneg (a : A) : 0 ≤ sqrt a := cfcₙ_predicate _ a
 
@@ -299,6 +304,7 @@ lemma mul_self_eq_mul_self_iff (a b : A) (ha : 0 ≤ a := by cfc_tac) (hb : 0 �
 `ℝ≥0` (for the left-hand side) and `ℝ` (for the right-hand side) use different predicates (i.e.,
 `(0 ≤ ·)` versus `IsSelfAdjoint`). Consequently, if `a` is selfadjoint but not nonnegative, then
 the left-hand side is zero, but the right-hand side is (provably equal to) `CFC.sqrt a⁺`. -/
+@[cfc_pull]
 lemma sqrt_eq_real_sqrt (a : A) (ha : 0 ≤ a := by cfc_tac) :
     CFC.sqrt a = cfcₙ Real.sqrt a := by
   suffices cfcₙ (fun x : ℝ ↦ √x * √x) a = cfcₙ (fun x : ℝ ↦ x) a by
@@ -413,8 +419,10 @@ lemma rpow_nonneg {a : A} {y : ℝ} : 0 ≤ a ^ y := cfc_predicate _ a
 
 grind_pattern rpow_nonneg => NonnegSpectrumClass ℝ A, a ^ y
 
+@[cfc_pull]
 lemma rpow_def {a : A} {y : ℝ} : a ^ y = cfc (fun x : ℝ≥0 => x ^ y) a := rfl
 
+@[cfc_pull]
 lemma rpow_eq_cfc_real [IsSemitopologicalRing A] [T2Space A] {a : A} {y : ℝ}
     (ha : 0 ≤ a := by cfc_tac) : a ^ y = cfc (fun x : ℝ => x ^ y) a := by
   rw [CFC.rpow_def, cfc_nnreal_eq_real ..]
@@ -638,6 +646,7 @@ lemma sqrt_eq_rpow {a : A} : sqrt a = a ^ (1 / 2 : ℝ) := by
   have : a ^ (1 / 2 : ℝ) = a ^ ((1 / 2 : ℝ≥0) : ℝ) := rfl
   rw [this, ← nnrpow_eq_rpow (by simp), sqrt_eq_nnrpow a]
 
+@[cfc_pull]
 lemma sqrt_eq_cfc {a : A} : sqrt a = cfc NNReal.sqrt a := by
   unfold sqrt
   rw [cfcₙ_eq_cfc]

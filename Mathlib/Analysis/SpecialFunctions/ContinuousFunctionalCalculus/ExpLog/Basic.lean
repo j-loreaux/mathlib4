@@ -8,6 +8,7 @@ module
 public import Mathlib.Analysis.SpecialFunctions.Exponential
 public import Mathlib.Analysis.CStarAlgebra.ContinuousFunctionalCalculus.Unique
 public import Mathlib.Analysis.CStarAlgebra.ContinuousFunctionalCalculus.Isometric
+public import Mathlib.Tactic.CFCPull.Attr
 public import Mathlib.Topology.ContinuousMap.ContinuousSqrt
 public import Mathlib.Analysis.SpecialFunctions.Log.Basic
 import Mathlib.Analysis.CStarAlgebra.ContinuousFunctionalCalculus.Continuity
@@ -66,6 +67,7 @@ variable {𝕜 : Type*} {A : Type*} [RCLike 𝕜] {p : A → Prop} [NormedRing A
   [StarRing A] [NormedAlgebra 𝕜 A] [ContinuousFunctionalCalculus 𝕜 A p]
 
 open scoped ContinuousFunctionalCalculus in
+@[cfc_pull]
 lemma exp_eq_normedSpace_exp {a : A} (ha : p a := by cfc_tac) :
     cfc (exp : 𝕜 → 𝕜) a = exp a := by
   conv_rhs => rw [← cfc_id 𝕜 a ha, cfc_apply id a ha]
@@ -84,6 +86,7 @@ section RealNormed
 variable {A : Type*} [NormedRing A] [StarRing A] [NormedAlgebra ℝ A]
   [ContinuousFunctionalCalculus ℝ A IsSelfAdjoint]
 
+@[cfc_pull 1100]
 lemma real_exp_eq_normedSpace_exp {a : A} (ha : IsSelfAdjoint a := by cfc_tac) :
     cfc Real.exp a = exp a :=
   Real.exp_eq_exp_ℝ ▸ exp_eq_normedSpace_exp ha
@@ -102,6 +105,7 @@ section ComplexNormed
 variable {A : Type*} {p : A → Prop} [NormedRing A] [StarRing A]
   [NormedAlgebra ℂ A] [ContinuousFunctionalCalculus ℂ A p]
 
+@[cfc_pull 1100]
 lemma complex_exp_eq_normedSpace_exp {a : A} (ha : p a := by cfc_tac) :
     cfc Complex.exp a = exp a :=
   Complex.exp_eq_exp_ℂ ▸ exp_eq_normedSpace_exp ha
@@ -119,6 +123,9 @@ variable {A : Type*} [NormedRing A] [StarRing A] [NormedAlgebra ℝ A]
 /-- The real logarithm, defined via the continuous functional calculus. This can be used on
 matrices, operators on a Hilbert space, elements of a C⋆-algebra, etc. -/
 noncomputable def log (a : A) : A := cfc Real.log a
+
+@[cfc_pull]
+lemma log_def (a : A) : log a = cfc Real.log a := rfl
 
 @[simp, grind =>]
 protected lemma _root_.IsSelfAdjoint.log {a : A} : IsSelfAdjoint (log a) := cfc_predicate _ a
