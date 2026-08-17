@@ -30,6 +30,9 @@ left over is either an honest side condition or an equality of functions that ha
 with `cfc_congr`.
 -/
 
+/- The predicate hypotheses below are used by `cfc_pull` itself (it tries `assumption` on the
+side goals it raises), which the unused-variable linter cannot see. -/
+set_option linter.unusedVariables false
 set_option maxHeartbeats 1000000
 
 section GenericUnital

@@ -469,9 +469,8 @@ mutual
 
 /-- Pull `e` towards `cfc f a` at the mode `want`. See `Spec.md` §6.2. -/
 partial def pull (e : Expr) (want : Mode) : PullM Result := withIncDepth do
-  withTraceNode `Tactic.cfc_pull
-      (fun r => return m!"{if r.toOption.isSome then checkEmoji else crossEmoji} \
-        pull {e} into a {want}") do
+  -- `withTraceNode` prefixes its own success/failure emoji, so the message needs none
+  withTraceNode `Tactic.cfc_pull (fun _ => return m!"pull {e} into a {want}") do
     let ctx ← read
     -- 1. the element itself
     if ← withReducible <| isDefEq e ctx.elem then
@@ -485,7 +484,8 @@ partial def pull (e : Expr) (want : Mode) : PullM Result := withIncDepth do
       if let some r := r then return r
     -- 3. tagged pull lemmas
     let candidates ← pullCandidates e want
-    trace[Tactic.cfc_pull] "candidates for {e}: {candidates.map (·.declName)}"
+    -- the expression is already in the enclosing trace node's message
+    trace[Tactic.cfc_pull] "candidates: {candidates.map (·.declName)}"
     for l in candidates do
       let r ← observing? do convert (← applyPullLemma l e want pull) want
       if let some r := r then return r

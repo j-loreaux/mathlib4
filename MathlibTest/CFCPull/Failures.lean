@@ -156,8 +156,8 @@ theorem cfcPullTest.notAnEquation : True := trivial
 #guard_msgs in
 attribute [cfc_pull] cfcPullTest.notAnEquation
 
-/-- An equation, but neither side is an application of the calculus. -/
 omit [Ring A] [StarRing A] [TopologicalSpace A] in
+/-- An equation, but neither side is an application of the calculus. -/
 theorem cfcPullTest.noCFC (a : A) : a = a := rfl
 
 /--
