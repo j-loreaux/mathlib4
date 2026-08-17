@@ -25,17 +25,17 @@ lemmas (`CFC.sqrt_def`, `CFC.abs_def`, `CFC.log_def`) live for now.
 ```lean
 inductive RingKey | const (n : Name) | any
 
-/-- A "mode": which calculus we are producing. The ring and element are `Expr`s at use time;
-`RingKey` is the static approximation stored in the index. -/
+/-- Which calculus we are producing.  The element is fixed for a whole run and lives in the
+`Context`, so a `Mode` only records the ring and the unitality.  `RingKey` is the static
+approximation of `ring` stored in the index. -/
 structure Mode where
   ring   : Expr
-  elem   : Expr
   unital : Bool
 
-/-- Where the `cfc`/`cfcₙ` application sits and what its arguments are. -/
+/-- The arguments of a `cfc`/`cfcₙ` application. -/
 structure CFCApp where
   unital : Bool
-  ring elem fn pred alg : Expr   -- R, a, f, p, A
+  R A p f a : Expr
 ```
 
 `CFCApp.match? : Expr → Option CFCApp` recognises `@cfc R A p _ .. _ f a` and
@@ -67,20 +67,26 @@ pattern).
 
 ### Classification at tagging time
 
-`forallTelescope` the lemma type — this puts the instance hypotheses into the local context as
-local instances, which is what makes `RingKey` detection and later `synthInstance` behave. Then
-`type.eq?`, apply `symm` if `←` was given, and dispatch on `CFCApp.match?` of the two sides
-exactly as the table in `Spec.md` §5 prescribes.
+`forallMetaTelescope` the lemma type, rather than `forallTelescope`. This matters twice over:
+type and instance arguments become metavariables and are therefore indexed as `DiscrTree`
+wildcards (with `forallTelescope` they would be free variables and would be indexed as such,
+so no lemma would ever match), and "a variable of the lemma" becomes "an unassigned
+metavariable", which is exactly what the tactic sees when it later applies the lemma. Then
+`type.eq?`, apply `symm` if `←` was given, and dispatch on `CFCApp.match?` of the two sides as
+the table in `Spec.md` §5 prescribes.
 
-`RingKey` of an expression `R`: `.const n` if `R` is a constant application with head `n` and no
-free variables of the telescope; `.any` otherwise.
+`RingKey` of an expression `R`: `.const n` if `R`'s head is the constant `n`, `.any` otherwise
+(in particular when `R` is one of the telescope's metavariables).
 
-Holes of a `Pull` lemma's algebra side: traverse with `Expr.replace`-style logic collecting
-maximal subterms `s` such that `CFCApp.match? s` succeeds with the same ring/unitality/element as
-the cfc side *and* `s`'s function argument is an fvar of the telescope. Reject the lemma if any
-hole contains a loose bound variable (see `Spec.md` §11). The `DiscrTree` key is
-`DiscrTree.mkPath` of the algebra side with holes replaced by fresh metavariables (which become
-wildcard keys).
+Holes of a `Pull` lemma's algebra side (`abstractHoles` + `isHoleFor`): the maximal subterms `s`
+such that `CFCApp.match? s` succeeds with the same unitality as the cfc side, the same ring and
+element up to `withNewMCtxDepth`-guarded `isDefEq`, and a *variable* function argument. Reject
+the lemma if any hole contains a loose bound variable (see `Spec.md` §11). The `DiscrTree` key is
+`DiscrTree.mkPath` of the algebra side with holes replaced by fresh metavariables.
+
+The same `abstractHoles`/`isHoleFor` pair runs again at application time, with "variable"
+reinterpreted as "unassigned metavariable"; this is why the hole notion is parameterised by a
+predicate rather than hard-coded.
 
 ## 3. The recursion (`Core.lean`)
 
@@ -101,10 +107,10 @@ structure State where
 abbrev PullM := ReaderT Context (StateRefT State MetaM)
 
 structure Result where
-  ring   : Expr
-  unital : Bool
-  fn     : Expr            -- `f : ring → ring`
-  proof  : Expr            -- `e = cfc[ₙ] f a`
+  mode  : Mode
+  fn    : Expr             -- `f : mode.ring → mode.ring`
+  rhs   : Expr             -- `cfc f a`, kept verbatim so its instances are the lemma's
+  proof : Expr             -- `e = rhs`
 ```
 
 The entry points are
