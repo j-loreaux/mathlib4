@@ -168,10 +168,9 @@ def cfcPullTarget (cfg : Config) (R elem : Expr) (goal : MVarId) : TacticM Unit 
     let F ← mkLambdaFVars xs (mkAppN target.getAppFn body)
     mkCongrN F proofs
   let hcongr ← mkExpectedTypeHint hcongr (← mkEq target newTarget)
-  let newGoal ← mkFreshExprSyntheticOpaqueMVar newTarget (tag := ← goal.getTag)
-  goal.assign (← mkEqMPR hcongr newGoal)
-  let mut main := [newGoal.mvarId!]
-  if ← tryTacticOn newGoal.mvarId! (← `(tactic| rfl)) then
+  let newGoal ← goal.replaceTargetEq newTarget hcongr
+  let mut main := [newGoal]
+  if ← tryTacticOn newGoal (← `(tactic| rfl)) then
     main := []
   replaceMainGoal (main ++ (← postProcessSideGoals cfg sideGoals).toList)
 
@@ -280,7 +279,8 @@ def configMentions (stx : Syntax) (field : Name) : Bool :=
 
 /-- Read the configuration, taking into account the unitality of a calculus found in the goal
 when the user did not mention `unital` explicitly. -/
-def mkConfig (cfgStx : Syntax) (goalUnital : Option Bool) : TacticM Config := do
+def mkConfig (cfgStx : TSyntax ``Lean.Parser.Term.optConfig) (goalUnital : Option Bool) :
+    TacticM Config := do
   let mut cfg ← elabCFCPullConfig cfgStx
   if !configMentions cfgStx `unital then
     if let some u := goalUnital then
@@ -290,20 +290,19 @@ def mkConfig (cfgStx : Syntax) (goalUnital : Option Bool) : TacticM Config := do
 /-- Elaborator for the `cfc_pull` tactic. -/
 @[tactic cfcPull]
 def evalCFCPull : Tactic := fun stx => withMainContext do
+  let `(tactic| cfc_pull $cfg:optConfig $[$ring?]? $[$elem?]?) := stx | throwUnsupportedSyntax
   let goal ← getMainGoal
   let target ← instantiateMVars (← goal.getType)
-  let (R, elem, goalUnital) ← elabRingAndElem target (stx[2].getOptional?.map (⟨·⟩))
-    (stx[3].getOptional?.map (⟨·⟩))
-  let cfg ← mkConfig stx[1] goalUnital
-  cfcPullTarget cfg R elem goal
+  let (R, elem, goalUnital) ← elabRingAndElem target ring? elem?
+  cfcPullTarget (← mkConfig cfg goalUnital) R elem goal
 
 /-- Elaborator for `cfc_pull` in `conv` mode. -/
 @[tactic cfcPullConv]
 def evalCFCPullConv : Tactic := fun stx => withMainContext do
+  let `(conv| cfc_pull $cfg:optConfig $[$ring?]? $[$elem?]?) := stx | throwUnsupportedSyntax
   let lhs ← Conv.getLhs
-  let (R, elem, goalUnital) ← elabRingAndElem lhs (stx[2].getOptional?.map (⟨·⟩))
-    (stx[3].getOptional?.map (⟨·⟩))
-  let cfg ← mkConfig stx[1] goalUnital
+  let (R, elem, goalUnital) ← elabRingAndElem lhs ring? elem?
+  let cfg ← mkConfig cfg goalUnital
   let (newLhs, proof, sideGoals) ← runPull cfg R elem lhs
   Conv.updateLhs newLhs proof
   let sideGoals ← postProcessSideGoals cfg sideGoals

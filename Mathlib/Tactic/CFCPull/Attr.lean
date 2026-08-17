@@ -343,14 +343,11 @@ register_option cfcPull.warnBoundHoles : Bool := {
 the equation (swapped if the lemma is used right-to-left) and a proof of `lhs = rhs`. -/
 def instantiateLemma (declName : Name) (symm : Bool) :
     MetaM (Array Expr × Array BinderInfo × Expr × Expr × Expr) := do
-  let info ← getConstInfo declName
-  let lvls ← info.levelParams.mapM fun _ => mkFreshLevelMVar
-  let proof := .const declName lvls
-  let (mvars, bis, type) ← forallMetaTelescope (info.type.instantiateLevelParams
-    info.levelParams lvls)
+  let c ← mkConstWithFreshMVarLevels declName
+  let (mvars, bis, type) ← forallMetaTelescope (← inferType c)
   let some (_, lhs, rhs) := type.eq? |
     throwError "`{declName}` is not an equation"
-  let proof := mkAppN proof mvars
+  let proof := mkAppN c mvars
   if symm then
     return (mvars, bis, rhs, lhs, ← mkEqSymm proof)
   else

@@ -202,24 +202,22 @@ def mkClassApp (clsName : Name) (args : Array Expr) : MetaM Expr := do
   let (mvars, bis, _) ←
     forallMetaTelescope (info.type.instantiateLevelParams info.levelParams lvls)
   let mut j := 0
-  for i in [0:mvars.size] do
-    if bis[i]! == .default && j < args.size then
-      unless ← isDefEq mvars[i]! args[j]! do
+  for (mvar, bi) in mvars.zip bis do
+    if bi == .default && j < args.size then
+      unless ← isDefEq mvar args[j]! do
         throwError "`{clsName}` does not accept `{args[j]!}` as its argument {j}"
       j := j + 1
-  for i in [0:mvars.size] do
-    if bis[i]!.isInstImplicit then
-      unless ← mvars[i]!.mvarId!.isAssigned do
-        let inst ← synthInstance (← instantiateMVars (← mvars[i]!.mvarId!.getType))
-        unless ← isDefEq mvars[i]! inst do
+  for (mvar, bi) in mvars.zip bis do
+    if bi.isInstImplicit then
+      unless ← mvar.mvarId!.isAssigned do
+        let inst ← synthInstance (← instantiateMVars (← mvar.mvarId!.getType))
+        unless ← isDefEq mvar inst do
           throwError "`{clsName}`: could not use the synthesised instance `{inst}`"
   return mkAppN (.const clsName lvls) mvars
 
 /-- The index in the cache of the information about the calculus at `mode`, if known. -/
 def findPredicateIdx (mode : Mode) : PullM (Option Nat) := do
-  let s ← get
-  for _h : i in [0:s.predicates.size] do
-    let pi := s.predicates[i]
+  for (pi, i) in (← get).predicates.zipIdx do
     if pi.mode.unital == mode.unital then
       if ← withReducible <| isDefEq pi.mode.ring mode.ring then
         return some i
@@ -265,16 +263,16 @@ unassigned. Failure here is the mechanism by which lemmas are restricted to the 
 algebras they apply to. -/
 def synthesizeInstances (declName : Name) (mvars : Array Expr) (bis : Array BinderInfo) :
     MetaM Unit := do
-  for _h : i in [0:mvars.size] do
-    if bis[i]!.isInstImplicit then
-      let mvarId := mvars[i]!.mvarId!
+  for (mvar, bi) in mvars.zip bis do
+    if bi.isInstImplicit then
+      let mvarId := mvar.mvarId!
       unless ← mvarId.isAssigned do
         let type ← instantiateMVars (← mvarId.getType)
         if type.hasExprMVar then
           throwError "`{declName}`: the instance argument `{type}` is not determined"
         let .some inst ← trySynthInstance type
           | throwError "`{declName}` does not apply here: no instance `{type}`"
-        unless ← isDefEq mvars[i]! inst do
+        unless ← isDefEq mvar inst do
           throwError "`{declName}`: the synthesised instance `{inst}` does not match"
 
 /-- Deal with the hypotheses of an instantiated lemma: those that are the predicate `p a` at
@@ -282,10 +280,10 @@ def synthesizeInstances (declName : Name) (mvars : Array Expr) (bis : Array Bind
 def collectHypotheses (declName : Name) (mvars : Array Expr) (bis : Array BinderInfo)
     (mode : Mode) : PullM Unit := do
   let ctx ← read
-  for _h : i in [0:mvars.size] do
-    let mvarId := mvars[i]!.mvarId!
+  for (mvar, bi) in mvars.zip bis do
+    let mvarId := mvar.mvarId!
     if ← mvarId.isAssigned then continue
-    if bis[i]!.isInstImplicit then continue
+    if bi.isInstImplicit then continue
     let type := stripAutoParam (← instantiateMVars (← mvarId.getType))
     unless ← isProp type do
       throwError "`{declName}` does not apply here: the argument of type `{type}` could not be \
@@ -425,18 +423,16 @@ def applyPullLemma (l : PullLemma) (e : Expr) (want : Mode)
   unless ← withReducible <| isDefEq pat e do
     throwError "`{l.declName}` does not match: `{pat}` ≠ `{e}`"
   -- Recurse on the subterms the holes matched.
-  let mut subs := #[]
   let mut results := #[]
   for h in phs do
     let sub ← instantiateMVars h
     if sub.isMVar then
       throwError "`{l.declName}`: the hole `{h}` was not determined by matching"
-    subs := subs.push sub
     results := results.push (← rec sub mode)
-  for _h : i in [0:holes.size] do
-    let some hc := CFCApp.match? holes[i]! | throwError "internal error: bad hole"
-    unless ← isDefEq hc.f results[i]!.fn do
-      throwError "`{l.declName}`: could not use the function found for `{subs[i]!}`"
+  for (hole, res) in holes.zip results do
+    let some hc := CFCApp.match? hole | throwError "internal error: bad hole"
+    unless ← isDefEq hc.f res.fn do
+      throwError "`{l.declName}`: could not use the function found for `{hole}`"
   synthesizeInstances l.declName mvars bis
   -- Assemble the proof.  `e = ⟨algebraic side⟩` by congruence, then the lemma itself.
   let algSide' ← instantiateMVars algSide
