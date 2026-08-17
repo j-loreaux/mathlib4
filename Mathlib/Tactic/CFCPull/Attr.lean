@@ -316,6 +316,17 @@ def isHoleFor (ref : CFCApp) (isVar : Expr → MetaM Bool) (s : Expr) : MetaM Bo
     unless ← isDefEq c.a ref.a do return false
     return true
 
+/-- A crude measure of the size of an expression, used to decide which side of a composition
+lemma is the "source", i.e. the one whose element is the more complicated. -/
+def exprSize : Expr → Nat
+  | .app f a => 1 + exprSize f + exprSize a
+  | .lam _ t b _ => 1 + exprSize t + exprSize b
+  | .forallE _ t b _ => 1 + exprSize t + exprSize b
+  | .letE _ t v b _ => 1 + exprSize t + exprSize v + exprSize b
+  | .mdata _ b => 1 + exprSize b
+  | .proj _ _ b => 1 + exprSize b
+  | _ => 1
+
 /-! ### Classification -/
 
 /-- Instantiate a tagged lemma: returns its metavariables, their binder infos, the two sides of
@@ -359,11 +370,12 @@ def mkEntry (declName : Name) (symm : Bool) (prio : Nat) : MetaM Entry := do
     if ← withNewMCtxDepth <| isDefEq cl.a cr.a then
       throwError "@[cfc_pull] failed: both sides of `{declName}` are applications of the same \
         functional calculus to the same element; there is nothing for `cfc_pull` to do."
-    let srcOnLhs ←
-      if cr.a.isMVar then pure true
-      else if cl.a.isMVar then pure false
-      else throwError "@[cfc_pull] failed: `{declName}` looks like a composition lemma, but \
-        neither side applies the functional calculus to a bare variable."
+    -- The side to rewrite *from* is the one applying the calculus to the bigger element:
+    -- `cfc F a = cfc f (a ^ n)` is used to turn the right-hand side into the left-hand side.
+    let srcOnLhs := exprSize cl.a > exprSize cr.a
+    if exprSize cl.a == exprSize cr.a then
+      throwError "@[cfc_pull] failed: `{declName}` looks like a composition lemma, but neither \
+        side applies the functional calculus to a more complicated element than the other."
     let src := if srcOnLhs then cl else cr
     let some innerHead := src.a.getAppFn.constName? |
       throwError "@[cfc_pull] failed: the element `{src.a}` in `{declName}` has no head constant \

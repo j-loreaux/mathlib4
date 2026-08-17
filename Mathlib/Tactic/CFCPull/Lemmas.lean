@@ -75,6 +75,7 @@ attribute [cfc_pull]
   cfc_neg_id cfc_pow_id cfc_smul_id cfc_star_id
   cfc_const cfc_const_one cfc_const_zero
   cfc_const_add cfc_add_const
+  cfc_inv cfc_inv_id cfc_zpow cfc_ringInverse_id cfc_map_div
 
 attribute [cfc_pull]
   cfcₙ_add cfcₙ_sub cfcₙ_neg cfcₙ_mul cfcₙ_smul cfcₙ_star
@@ -99,7 +100,8 @@ attribute [cfc_pull]
 element being pulled towards; the other lemmas are shortcuts that avoid a continuity side goal
 for the inner function. -/
 
-attribute [cfc_pull] cfc_comp' cfc_comp_pow cfc_comp_smul cfc_comp_star cfc_comp_neg
+attribute [cfc_pull]
+  cfc_comp' cfc_comp_pow cfc_comp_smul cfc_comp_star cfc_comp_neg cfc_comp_inv cfc_comp_zpow
 attribute [cfc_pull 1100] cfc_comp_const_mul
 
 attribute [cfc_pull] cfcₙ_comp' cfcₙ_comp_smul cfcₙ_comp_star cfcₙ_comp_neg
