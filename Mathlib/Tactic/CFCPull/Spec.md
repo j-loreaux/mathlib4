@@ -185,9 +185,14 @@ Stored data per category:
   `DiscrTree` key is computed after replacing the holes by wildcards, so `cfc_mul` is indexed
   under `HMul.hMul _ _ _ _ * *`.
 
-  Holes may occur anywhere in the algebra side except under a binder that they mention (so
-  `cfc_sum : cfc (∑ i ∈ s, f i) a = ∑ i ∈ s, cfc (f i) a` is *not* supported; it is rejected at
-  tagging time with an explanatory error).
+  A hole may sit under a binder, but it may not *mention* the bound variable: in
+  `cfc_sum : cfc (∑ i ∈ s, f i) a = ∑ i ∈ s, cfc (f i) a` the subterm `cfc (f i) a` mentions `i`
+  and so is not recognised as a hole. Such a lemma is still tagged — with one fewer hole, and a
+  warning saying so — and remains usable in the degenerate case where that position is *already*
+  an application of the calculus (higher-order pattern unification solves `cfc (?f i) a` against
+  `cfc (g i) a`). What it cannot do is recurse into the summands: `cfc_pull` gets stuck on
+  `∑ i ∈ s, star (cfc (g i) a)`. See [§11](#11-deliberate-non-goals-and-future-work) for what
+  supporting this properly would take.
 * **`Scalar`** — source ring key, target ring key, unitality. Stored as an edge list.
 * **`Unital`** — the ring key and which side is non-unital. Stored as a list; usable in both
   directions (right-to-left needs no extra hypotheses beyond those of the lemma).
@@ -454,9 +459,9 @@ carry non-syntactic hypotheses and are deliberately *not* tagged.
 `cfc_comp_zpow`, `cfc_comp_const_mul` (priority 1100), and the non-unital `cfcₙ_comp_smul`,
 `cfcₙ_comp_star`, `cfcₙ_comp_neg`, `cfcₙ_comp_const_mul` (priority 1100).
 
-Not yet tagged, for want of support or of a use case: `cfc_sum` and `cfc_apply_pi` (holes under a
-binder), the polynomial lemmas (`cfc_map_polynomial`, `cfc_comp_polynomial`), and the `Unitization`
-bridges.
+Not tagged: `cfc_sum` and `cfc_apply_pi` (they would be accepted, but with the hole under the
+binder unrecognised, so they would only ever fire in the degenerate case described in §5), the
+polynomial lemmas (`cfc_map_polynomial`, `cfc_comp_polynomial`), and the `Unitization` bridges.
 
 ## 10. Errors, tracing and limits
 
@@ -483,8 +488,27 @@ conversions applied.
 * **Side-goal ergonomics.** Grouping `ContinuousOn` goals into a single conjunction, or naming
   goal groups so they can be addressed with `case ... => fun_prop`.
 * **Building `ContinuousOn` proofs during the traversal** rather than deferring them.
-* **Lemmas whose holes appear under binders** (`cfc_sum`, `cfc_apply_pi`); these need a
-  dependent congruence and are rejected at tagging time for now.
+* **Recursing under a binder** (`cfc_sum`, `cfc_apply_pi`). A hole that mentions the bound
+  variable is not one element of `A` but a family indexed by it, and every layer of the design
+  assumes otherwise. Supporting it means changing three things at once:
+
+  1. *Matching.* The placeholder must become a function-valued metavariable `?b : ι → A` so that
+     the pattern reads `∑ i ∈ s, ?b i`. This part is easy — it is a Miller pattern, and Lean's
+     unifier solves it — but it needs its own code path, since `abstractHoles` currently
+     substitutes an element-valued metavariable.
+  2. *Recursion.* `pull` would have to run under `withLocalDecl i : ι` and return a family
+     `f : ι → R → R` together with `∀ i ∈ s, b i = cfc (f i) a`, rather than a single function
+     and a single equation. Side goals created inside the binder would have to be generalised
+     over `i` before being handed back, and `Result` would have to carry the binder.
+  3. *Congruence.* `mkCongrN`, which folds `mkCongr` over a non-dependent `F : A → ⋯ → A → A`,
+     no longer applies: from `∀ i ∈ s, b i = cfc (f i) a` one needs `Finset.sum_congr`, i.e. a
+     congruence lemma specific to the binder-introducing constant. The generic route is to stop
+     hand-rolling the congruence and use `simp`'s `@[congr]` infrastructure (or
+     `Lean.Meta.mkCongrSimp?` for the head symbol) instead.
+
+  None of this is out of reach, but (2) touches every signature in `Core.lean`, and the payoff is
+  small: goals of the form `∑ i ∈ s, ⟨something⟩ = cfc _ a` are rare. Hence the current
+  behaviour, which is to warn and carry on with one fewer hole.
 * **Relations other than binary ones**, and `cfc_pull ... at h`.
 * **File placement.** `Examples.lean` lives under `Mathlib/` but imports all of Mathlib, so it is
   deliberately not registered in `Mathlib.lean` (the four tactic files are). Before a pull

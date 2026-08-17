@@ -275,6 +275,10 @@ variable {a : A}
 open Complex
 open scoped NNReal
 
+example [Nontrivial A] (ha : IsSelfAdjoint a) :
+    a + I • cfcₙ Real.sqrt (1 - a ^ 2) = cfc (fun x ↦ x + I * ↑√(1 - x.re ^ 2)) a := by
+  cfc_pull +discharge ℂ a
+
 /- `cfc_pull` converts from the non-unital calculus over `ℝ` to the unital one over `ℂ`. It does
 not close the goal: it produces `fun x ↦ x + I * ↑√(1 - x.re ^ 2)`, whereas the statement asks
 for `fun x ↦ ↑x.re + I * ↑√(1 - x.re ^ 2)`. Both are correct — `a` is selfadjoint, so the two

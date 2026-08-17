@@ -316,6 +316,34 @@ def isHoleFor (ref : CFCApp) (isVar : Expr → MetaM Bool) (s : Expr) : MetaM Bo
     unless ← isDefEq c.a ref.a do return false
     return true
 
+/-- The subterms of `alg` that *would* be holes relative to `ref` were it not for the bound
+variables they mention. `abstractHoles` skips these, so a lemma containing one is usable but
+weaker than it looks; the attribute warns about them.
+
+The test deliberately avoids `isDefEq`, which cannot be run on an expression with loose bound
+variables; matching the head constant and the shape of the function argument is enough to
+recognise the situation. -/
+partial def boundHoles (ref : CFCApp) (alg : Expr) : Array Expr :=
+  go alg #[]
+where
+  /-- Whether `e` is a would-be hole blocked by a bound variable. -/
+  isBoundHole (e : Expr) : Bool :=
+    e.hasLooseBVars &&
+      (match CFCApp.match? e with
+        | some c => c.unital == ref.unital && c.f.getAppFn.isMVar
+        | none => false)
+  /-- The traversal.  It stops at the outermost match, so that a partial application of `cfc`
+  inside a full one is not reported a second time. -/
+  go (e : Expr) (acc : Array Expr) : Array Expr :=
+    if isBoundHole e then acc.push e else
+    match e with
+    | .app f x => go x (go f acc)
+    | .lam _ t b _ | .forallE _ t b _ => go b (go t acc)
+    | .letE _ t v b _ => go b (go v (go t acc))
+    | .mdata _ b => go b acc
+    | .proj _ _ b => go b acc
+    | _ => acc
+
 /-- A crude measure of the size of an expression, used to decide which side of a composition
 lemma is the "source", i.e. the one whose element is the more complicated. -/
 def exprSize : Expr → Nat
@@ -389,10 +417,11 @@ where
       return .id { declName, symm, ring := .ofExpr c.R, unital := c.unital, cfcOnLhs }
     let isVar (e : Expr) : MetaM Bool := return e.isMVar
     let (pat, holes, _) ← abstractHoles (isHoleFor c isVar) (mkFreshExprMVar c.A) alg
-    for h in holes do
-      if h.hasLooseBVars then
-        throwError "@[cfc_pull] failed: in `{declName}`, the subterm `{h}` mentions a bound \
-          variable, so `cfc_pull` cannot recurse into it."
+    for b in boundHoles c alg do
+      logWarning m!"`{declName}` applies the functional calculus at `{b}`, which mentions a bound \
+        variable. `cfc_pull` cannot recurse under a binder, so it will treat that position as \
+        part of the pattern rather than as a hole: the lemma will only apply when the position \
+        is already an application of the calculus."
     let keys ← DiscrTree.mkPath pat
     if keys.size ≤ 1 then
       throwError "@[cfc_pull] failed: the non-`cfc` side of `{declName}` is `{alg}`, which has \
