@@ -59,11 +59,20 @@ def autoParamTacticFor (g : MVarId) : MetaM (TSyntax `tactic) := do
       | cfc_tac)
 
 /-- Try to close the collected side goals: `assumption` always, and the standard auto-param
-tactics when `+discharge` was given. Returns the goals that survive. -/
+tactics when `+discharge` was given. Duplicates are merged, which matters because the two sides
+of a relation are pulled independently and so tend to ask for the same predicate twice. Returns
+the goals that survive. -/
 def postProcessSideGoals (cfg : Config) (goals : Array MVarId) : TacticM (Array MVarId) := do
   let mut out := #[]
   for g in goals do
     if ← g.isAssigned then continue
+    -- merge with an earlier goal of the same type
+    let type ← instantiateMVars (← g.getType)
+    if ← out.anyM fun g' => do
+        if ← withReducible <| isDefEq type (← g'.getType) then
+          g.assign (mkMVar g'); return true
+        else return false then
+      continue
     if ← g.assumptionCore then continue
     if cfg.discharge then
       if ← tryTacticOn g (← autoParamTacticFor g) then continue
@@ -116,16 +125,16 @@ def cfcPullTarget (cfg : Config) (R elem : Expr) (goal : MVarId) : TacticM Unit 
   let mut proofs := #[]
   let mut sideGoals := #[]
   let mut changed := false
-  let mut failures : Array MessageData := #[]
+  let mut failures : Array String := #[]
   for i in positions do
     let arg := args[i]!
     let mctx ← getMCtx
-    let attempt : Except MessageData (Expr × Expr × Array MVarId) ← (do
+    let attempt : Except String (Expr × Expr × Array MVarId) ← (do
       try
         return .ok (← runPull cfg R elem arg)
       catch ex =>
         setMCtx mctx
-        return .error ex.toMessageData)
+        return .error (← ex.toMessageData.toString))
     match attempt with
     | .ok (newArg, proof, goals) =>
       newArgs := newArgs.set! i newArg
@@ -133,10 +142,12 @@ def cfcPullTarget (cfg : Config) (R elem : Expr) (goal : MVarId) : TacticM Unit 
       sideGoals := sideGoals ++ goals
       unless newArg == arg do changed := true
     | .error msg =>
-      failures := failures.push msg
+      -- the two sides of a relation usually fail for the same reason; do not say so twice
+      unless failures.contains msg do failures := failures.push msg
       proofs := proofs.push (← mkEqRefl arg)
   unless changed do
-    throwError "`cfc_pull` made no progress{indentD (MessageData.joinSep failures.toList m!"\n")}"
+    throwError "`cfc_pull` made no progress\
+      {indentD (MessageData.joinSep (failures.toList.map (m!"{·}")) m!"\n")}"
   -- Rebuild the goal by congruence over the positions we changed.
   let newTarget := mkAppN target.getAppFn newArgs
   let hcongr ← withLocalDeclsD (positions.map fun _ => (`x, fun _ => pure alg)) fun xs => do

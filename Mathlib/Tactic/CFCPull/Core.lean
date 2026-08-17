@@ -190,7 +190,11 @@ def getPredicate (mode : Mode) : PullM Expr := do
     catch _ =>
       throwError "`cfc_pull` could not even state `{clsName} {mode.ring} {ctx.alg} _`; the \
         algebra is missing some of the structure the continuous functional calculus needs"
-  let _ ← synthInstance cls
+  let _ ←
+    try synthInstance cls
+    catch _ =>
+      throwError "`cfc_pull`: `{ctx.alg}` has no {if mode.unital then "" else "non-unital "}\
+        continuous functional calculus over `{mode.ring}`"
   let pred ← instantiateMVars p
   if pred.hasExprMVar then
     throwError "`cfc_pull` could not determine the predicate of the continuous functional \
@@ -582,7 +586,9 @@ def runPull (cfg : Config) (R elem e : Expr) : MetaM (Expr × Expr × Array MVar
   let target ← mkMode cfg R alg
   let lemmas ← getLemmas
   let ctx : Context := { cfg, elem, alg, target, lemmas }
-  let (res, st) ← ((pull e target).run ctx).run {}
+  -- Compute the predicate up front, so that "there is no such functional calculus" is reported
+  -- as itself rather than as a pile of failed lemma applications.
+  let (res, st) ← ((do let _ ← getPredicate target; pull e target).run ctx).run {}
   let goals ← st.sideGoals.filterM fun g => return !(← g.isAssigned)
   return (← instantiateMVars res.rhs, ← instantiateMVars res.proof, goals)
 
