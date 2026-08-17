@@ -16,7 +16,8 @@ public import Mathlib.Analysis.CStarAlgebra.ContinuousFunctionalCalculus.Order
 `set_option trace.Tactic.cfc_pull true` makes `cfc_pull` report its reasoning as a tree: one node
 per subexpression it recurses into, and inside each node the candidate lemmas retrieved from the
 `@[cfc_pull]` index, which of them were rejected and why, which hypotheses were filled from the
-shared predicate proof and which were deferred as side goals, and which conversions were applied.
+shared predicate proof and which were deferred as side goals, which conversions were applied,
+and finally what became of each side goal.
 
 This file is both a demonstration and a regression test for that output. `#cfc_pull_lemmas`, at
 the end, prints the lemma database itself.
@@ -41,11 +42,12 @@ trace: [Tactic.cfc_pull] predicate for cfc over ℂ is IsStarNormal
   [Tactic.cfc_pull] `cfc_star_id`: filled `IsStarNormal a` from the shared predicate proof
 [Tactic.cfc_pull] predicate for cfc over ℂ is IsStarNormal
 [Tactic.cfc_pull] ✅️ pull cfc (fun x => star x) a into a cfc over ℂ
+[Tactic.cfc_pull] ✅️ closed `IsStarNormal a` with `assumption`
 -/
 #guard_msgs in
 set_option trace.Tactic.cfc_pull true in
 example (ha : IsStarNormal a) : star a = cfc (fun x : ℂ ↦ star x) a := by
-  cfc_pull +discharge ℂ a
+  cfc_pull ℂ a
 
 /-! ### Backtracking
 
@@ -66,15 +68,16 @@ trace: [Tactic.cfc_pull] predicate for cfc over ℂ is IsStarNormal
        cfcₙ_smul_id,
        cfcₙ_smul]
   [Tactic.cfc_pull] ❌️ `cfc_const_mul_id` does not match: `?r • a` ≠ `3 • a`
-  [Tactic.cfc_pull] ❌️ `cfc_const_mul` does not match: `?r • ?m.77` ≠ `3 • a`
+  [Tactic.cfc_pull] ❌️ `cfc_const_mul` does not match: `?r • ?_` ≠ `3 • a`
   [Tactic.cfc_pull] `cfc_smul_id`: filled `IsStarNormal a` from the shared predicate proof
 [Tactic.cfc_pull] predicate for cfc over ℂ is IsStarNormal
 [Tactic.cfc_pull] ✅️ pull cfc (fun x => 3 • x) a into a cfc over ℂ
+[Tactic.cfc_pull] ✅️ closed `IsStarNormal a` with `assumption`
 -/
 #guard_msgs in
 set_option trace.Tactic.cfc_pull true in
 example (ha : IsStarNormal a) : (3 : ℕ) • a = cfc (fun x : ℂ ↦ (3 : ℕ) • x) a := by
-  cfc_pull +discharge ℂ a
+  cfc_pull ℂ a
 
 /-! ### Conversions and deferred side goals
 
@@ -94,11 +97,43 @@ trace: [Tactic.cfc_pull] predicate for cfc over ℂ is IsStarNormal
   [Tactic.cfc_pull] `cfc_real_eq_complex`: filled `IsSelfAdjoint a` from the shared predicate proof
 [Tactic.cfc_pull] predicate for cfc over ℂ is IsStarNormal
 [Tactic.cfc_pull] ✅️ pull cfc (fun z => ↑z.re⁺) a into a cfc over ℂ
+[Tactic.cfc_pull] ✅️ closed `ContinuousOn (fun x => x⁺) (quasispectrum ℝ a)` with `cfc_cont_tac`
+[Tactic.cfc_pull] ✅️ closed `0⁺ = 0` with `cfc_zero_tac`
+[Tactic.cfc_pull] ✅️ closed `IsSelfAdjoint a` with `assumption`
 -/
 #guard_msgs in
 set_option trace.Tactic.cfc_pull true in
 example (ha : IsSelfAdjoint a) : a⁺ = cfc (fun z : ℂ ↦ (z.re⁺ : ℝ)) a := by
-  cfc_pull +discharge ℂ a
+  cfc_pull ℂ a
+
+/-! ### Side goals that could not be discharged
+
+`Real.log` is not continuous at `0`, so `cfc_cont_tac` cannot prove the continuity hypothesis of
+`cfc_mul` and the goal comes back to the user. The trace records the attempt, and `+defer` is
+what turns the leftover into a goal rather than an error. -/
+
+/--
+trace: [Tactic.cfc_pull] predicate for cfc over ℝ is IsSelfAdjoint
+[Tactic.cfc_pull] ✅️ pull CFC.log a * CFC.log a into a cfc over ℝ
+  [Tactic.cfc_pull] candidates: [cfc_mul, cfcₙ_mul]
+  [Tactic.cfc_pull] ✅️ pull CFC.log a into a cfc over ℝ
+    [Tactic.cfc_pull] candidates: [CFC.log_def]
+  [Tactic.cfc_pull] ✅️ pull CFC.log a into a cfc over ℝ
+    [Tactic.cfc_pull] candidates: [CFC.log_def]
+  [Tactic.cfc_pull] `cfc_mul`: deferred `ContinuousOn Real.log (spectrum ℝ a)`
+  [Tactic.cfc_pull] `cfc_mul`: deferred `ContinuousOn Real.log (spectrum ℝ a)`
+[Tactic.cfc_pull] predicate for cfc over ℝ is IsSelfAdjoint
+[Tactic.cfc_pull] ✅️ pull cfc (fun x => Real.log x * Real.log x) a into a cfc over ℝ
+[Tactic.cfc_pull] ❌️ could not close `ContinuousOn Real.log (spectrum ℝ a)`
+[Tactic.cfc_pull] side goal `ContinuousOn Real.log (spectrum ℝ a)` is a duplicate
+-/
+#guard_msgs in
+set_option trace.Tactic.cfc_pull true in
+example (ha : IsStrictlyPositive a) :
+    CFC.log a * CFC.log a = cfc (fun x : ℝ ↦ Real.log x * Real.log x) a := by
+  cfc_pull +defer ℝ a
+  case cfc_pull.continuity =>
+    exact Real.continuousOn_log.mono fun x hx h ↦ spectrum.zero_notMem ℝ ha.2 (h ▸ hx)
 
 /-! ### A failure
 

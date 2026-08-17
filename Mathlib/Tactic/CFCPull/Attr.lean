@@ -283,26 +283,19 @@ used, both in left-to-right traversal order.
 
 Subterms containing loose bound variables are never treated as holes; a hole underneath a binder
 is fine as long as it does not mention the bound variable. -/
-partial def abstractHoles (isHole : Expr → MetaM Bool) (mk : MetaM Expr) (e : Expr) :
+def abstractHoles (isHole : Expr → MetaM Bool) (mk : MetaM Expr) (e : Expr) :
     MetaM (Expr × Array Expr × Array Expr) := do
-  let (pat, (holes, phs)) ← (go e).run (#[], #[])
-  return (pat, holes, phs)
-where
-  /-- The traversal. -/
-  go (e : Expr) : StateT (Array Expr × Array Expr) MetaM Expr := do
-    if !e.hasLooseBVars then
-      if ← isHole e then
-        let ph ← mk
-        modify fun (hs, ps) => (hs.push e, ps.push ph)
-        return ph
-    match e with
-    | .app f x => return .app (← go f) (← go x)
-    | .lam n t b bi => return .lam n (← go t) (← go b) bi
-    | .forallE n t b bi => return .forallE n (← go t) (← go b) bi
-    | .letE n t v b nd => return .letE n (← go t) (← go v) (← go b) nd
-    | .mdata d b => return .mdata d (← go b)
-    | .proj s i b => return .proj s i (← go b)
-    | _ => return e
+  let holes ← IO.mkRef (#[] : Array Expr)
+  let phs ← IO.mkRef (#[] : Array Expr)
+  let pat ← Meta.transform e (pre := fun s => do
+    if s.hasLooseBVars then return .continue
+    unless ← isHole s do return .continue
+    let ph ← mk
+    holes.modify (·.push s)
+    phs.modify (·.push ph)
+    -- `.done` stops the traversal here, which is what makes the holes maximal
+    return .done ph)
+  return (pat, ← holes.get, ← phs.get)
 
 /-- Test whether `s` is a hole relative to the `cfc` application `ref`: an application of the
 same calculus, at the same ring and element, whose function argument is a variable in the sense
@@ -323,37 +316,18 @@ weaker than it looks; the attribute warns about them.
 The test deliberately avoids `isDefEq`, which cannot be run on an expression with loose bound
 variables; matching the head constant and the shape of the function argument is enough to
 recognise the situation. -/
-partial def boundHoles (ref : CFCApp) (alg : Expr) : Array Expr :=
-  go alg #[]
-where
-  /-- Whether `e` is a would-be hole blocked by a bound variable. -/
-  isBoundHole (e : Expr) : Bool :=
-    e.hasLooseBVars &&
-      (match CFCApp.match? e with
-        | some c => c.unital == ref.unital && c.f.getAppFn.isMVar
-        | none => false)
-  /-- The traversal.  It stops at the outermost match, so that a partial application of `cfc`
-  inside a full one is not reported a second time. -/
-  go (e : Expr) (acc : Array Expr) : Array Expr :=
-    if isBoundHole e then acc.push e else
-    match e with
-    | .app f x => go x (go f acc)
-    | .lam _ t b _ | .forallE _ t b _ => go b (go t acc)
-    | .letE _ t v b _ => go b (go v (go t acc))
-    | .mdata _ b => go b acc
-    | .proj _ _ b => go b acc
-    | _ => acc
-
-/-- A crude measure of the size of an expression, used to decide which side of a composition
-lemma is the "source", i.e. the one whose element is the more complicated. -/
-def exprSize : Expr → Nat
-  | .app f a => 1 + exprSize f + exprSize a
-  | .lam _ t b _ => 1 + exprSize t + exprSize b
-  | .forallE _ t b _ => 1 + exprSize t + exprSize b
-  | .letE _ t v b _ => 1 + exprSize t + exprSize v + exprSize b
-  | .mdata _ b => 1 + exprSize b
-  | .proj _ _ b => 1 + exprSize b
-  | _ => 1
+def boundHoles (ref : CFCApp) (alg : Expr) : MetaM (Array Expr) := do
+  let acc ← IO.mkRef (#[] : Array Expr)
+  alg.forEach' fun e => do
+    if e.hasLooseBVars then
+      if let some c := CFCApp.match? e then
+        if c.unital == ref.unital && c.f.getAppFn.isMVar then
+          acc.modify (·.push e)
+          -- do not descend: a partial application of `cfc` inside a full one is not a
+          -- separate hole
+          return false
+    return true
+  acc.get
 
 /-- Whether to warn when a `@[cfc_pull]` lemma applies the calculus under a binder, in a
 position `cfc_pull` cannot recurse into. Set to `false` when tagging such a lemma on purpose. -/
@@ -388,15 +362,15 @@ def mkEntry (declName : Name) (symm : Bool) (prio : Nat) : MetaM Entry := do
   let (_, _, lhs, rhs, _) ← instantiateLemma declName symm
   match CFCApp.match? lhs, CFCApp.match? rhs with
   | none, none =>
-    throwError "@[cfc_pull] failed: neither side of `{declName}` has `cfc` or `cfcₙ` as its \
-      head symbol.\n  {lhs} = {rhs}"
+    throwError "@[cfc_pull] failed: neither side of `{declName}` has `cfc` or `cfcₙ`\n\
+      as its head symbol:{indentD m!"{lhs} = {rhs}"}"
   | some c, none => mkPullEntry c rhs (cfcOnLhs := true)
   | none, some c => mkPullEntry c lhs (cfcOnLhs := false)
   | some cl, some cr => do
     let sameRing ← withNewMCtxDepth <| isDefEq cl.R cr.R
     if !sameRing then
       unless cl.unital == cr.unital do
-        throwError "@[cfc_pull] failed: `{declName}` changes both the scalar ring and the \
+        throwError "@[cfc_pull] failed: `{declName}` changes both the scalar ring and the\n\
           unitality of the functional calculus; such lemmas are not supported."
       return .scalar
         { declName, symm, src := .ofExpr cl.R, tgt := .ofExpr cr.R, unital := cl.unital }
@@ -404,18 +378,18 @@ def mkEntry (declName : Name) (symm : Bool) (prio : Nat) : MetaM Entry := do
       return .unital { declName, symm, ring := .ofExpr cl.R, nonUnitalOnLhs := !cl.unital }
     -- same ring, same unitality: this must be a composition lemma
     if ← withNewMCtxDepth <| isDefEq cl.a cr.a then
-      throwError "@[cfc_pull] failed: both sides of `{declName}` are applications of the same \
+      throwError "@[cfc_pull] failed: both sides of `{declName}` are applications of the same\n\
         functional calculus to the same element; there is nothing for `cfc_pull` to do."
-    -- The side to rewrite *from* is the one applying the calculus to the bigger element:
+    -- The side to rewrite *from* is the one applying the calculus to the deeper element:
     -- `cfc F a = cfc f (a ^ n)` is used to turn the right-hand side into the left-hand side.
-    let srcOnLhs := exprSize cl.a > exprSize cr.a
-    if exprSize cl.a == exprSize cr.a then
-      throwError "@[cfc_pull] failed: `{declName}` looks like a composition lemma, but neither \
+    let srcOnLhs := cl.a.approxDepth > cr.a.approxDepth
+    if cl.a.approxDepth == cr.a.approxDepth then
+      throwError "@[cfc_pull] failed: `{declName}` looks like a composition lemma, but neither\n\
         side applies the functional calculus to a more complicated element than the other."
     let src := if srcOnLhs then cl else cr
     let some innerHead := src.a.getAppFn.constName? |
-      throwError "@[cfc_pull] failed: the element `{src.a}` in `{declName}` has no head constant \
-        to index on."
+      throwError "@[cfc_pull] failed: the element `{src.a}` in `{declName}` has no head\n\
+        constant to index on."
     return .compose
       { declName, symm, prio, ring := .ofExpr cl.R, unital := cl.unital, srcOnLhs, innerHead }
 where
@@ -425,16 +399,19 @@ where
       return .id { declName, symm, ring := .ofExpr c.R, unital := c.unital, cfcOnLhs }
     let isVar (e : Expr) : MetaM Bool := return e.isMVar
     let (pat, holes, _) ← abstractHoles (isHoleFor c isVar) (mkFreshExprMVar c.A) alg
-    for b in boundHoles c alg do
+    for b in ← boundHoles c alg do
       unless cfcPull.warnBoundHoles.get (← getOptions) do continue
-      logWarning m!"`{declName}` applies the functional calculus at `{b}`, which mentions a bound \
-        variable. `cfc_pull` cannot recurse under a binder, so it will treat that position as \
-        part of the pattern rather than as a hole: the lemma will only apply when the position \
-        is already an application of the calculus."
+      logWarning m!"`{declName}` applies the functional calculus at{indentExpr b}\n\
+        which mentions a bound variable. `cfc_pull` cannot recurse under a binder, so it will\n\
+        treat that position as part of the pattern rather than as a hole: the lemma will only\n\
+        apply when the position is already an application of the calculus.\n\
+        \n\
+        If that is what you intend, silence this warning with\n\
+        `set_option cfcPull.warnBoundHoles false in`."
     let keys ← DiscrTree.mkPath pat
     if keys.size ≤ 1 then
-      throwError "@[cfc_pull] failed: the non-`cfc` side of `{declName}` is `{alg}`, which has \
-        no head symbol to index on."
+      throwError "@[cfc_pull] failed: the non-`cfc` side of `{declName}` is `{alg}`,\n\
+        which has no head symbol to index on."
     return .pull
       { declName, symm, prio, ring := .ofExpr c.R, unital := c.unital, cfcOnLhs,
         numHoles := holes.size }

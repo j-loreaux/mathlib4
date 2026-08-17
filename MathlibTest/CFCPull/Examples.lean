@@ -19,11 +19,11 @@ This is the main test suite for `cfc_pull`. Each example states an identity betw
 expression in a C⋆-algebra (or in any algebra with a continuous functional calculus) and the same
 expression with `cfc`/`cfcₙ` pulled to the head, and proves it with `cfc_pull`.
 
-`cfc_pull` produces the main goal (an equality of two `cfc` applications, which is closed by
-`rfl` when the two functions agree) followed by the hypotheses of the lemmas it used. The
-`+discharge` option additionally runs the standard auto-param tactics `cfc_tac`, `cfc_cont_tac`
-and `cfc_zero_tac` on those side goals, which is what makes most of the examples below close
-outright.
+`cfc_pull` replaces the goal by an equality of two `cfc` applications — closed by `rfl` when the
+two functions agree — and discharges the hypotheses of the lemmas it used with `assumption` and
+the standard auto-param tactics `cfc_tac`, `cfc_cont_tac` and `cfc_zero_tac`. Anything it cannot
+close is an error unless `+defer` is given, in which case it becomes a goal named after its kind
+(`cfc_pull.continuity`, `cfc_pull.predicate`, `cfc_pull.mapZero`, `cfc_pull.side`).
 
 Examples that `cfc_pull` deliberately does *not* finish are marked as such; in every case what is
 left over is either an honest side condition or an equality of functions that has to be settled
@@ -47,45 +47,45 @@ variable {R A : Type*} {p : A → Prop} [CommSemiring R]
 
 example (ha : p a) :
     star a * a = cfc (fun x : R ↦ star x * x) a := by
-  cfc_pull +discharge R a
+  cfc_pull R a
 
-/-- Without `+discharge`, the continuity hypotheses are left to the user. -/
+/-- With `+defer` the continuity hypotheses are left to the user instead of being discharged. -/
 example (ha : p a) :
     star a * a = cfc (fun x : R ↦ star x * x) a := by
-  cfc_pull R a <;> fun_prop
+  cfc_pull +defer R a <;> fun_prop
 
 example (ha : p a) (hf : ContinuousOn f (spectrum R a)) (hg : ContinuousOn g (spectrum R a)) :
     star (cfc f a) + cfc g a + a = cfc (fun x ↦ star (f x) + g x + x) a := by
-  cfc_pull +discharge R a
+  cfc_pull R a
 
 example (ha : p a) :
     a ^ 2 + 3 • a * cfc (id : R → R) a = cfc (fun x : R ↦ x ^ 2 + 3 • x * x) a := by
-  cfc_pull +discharge R a
+  cfc_pull R a
 
 /- Composition: the calculus is applied to `a ^ 2` rather than to `a`, which `cfc_comp_pow`
 resolves in one step. -/
 example (ha : p a) (hf : ContinuousOn f ((· ^ 2) '' spectrum R a)) :
     cfc f (a ^ 2) = cfc (fun x ↦ f (x ^ 2)) a := by
-  cfc_pull +discharge R a
+  cfc_pull R a
 
 /- A double composition: `cfc_comp_pow` peels off the power, and `cfc_comp'` the inner `cfc`. -/
 example (ha : p a) (hf : Continuous f) (hg : ContinuousOn g (spectrum R a)) :
     cfc f ((cfc g a) ^ 2) = cfc (fun x ↦ f (g x ^ 2)) a := by
-  cfc_pull +discharge R a
+  cfc_pull R a
 
 /- `cfc_pull` also works in `conv` mode, which is how one pulls at a specific position. -/
 example (ha : p a) (b : A) :
     star a * a + b = cfc (fun x : R ↦ star x * x) a + b := by
-  conv in star a * a => cfc_pull +discharge R a
+  conv in star a * a => cfc_pull R a
 
 /- `cfc_pull` does not go under binders; `conv` does. Pull each summand under the binder first,
 and then let `cfc_sum` collect the result. -/
 example (ha : p a) {ι : Type*} {s : Finset ι} {h : ι → R → R}
     (hh : ∀ i, ContinuousOn (h i) (spectrum R a)) :
     ∑ i ∈ s, star (cfc (h i) a) = cfc (∑ i ∈ s, fun x ↦ star (h i x)) a := by
-  conv_lhs => enter [2, i]; cfc_pull +discharge R a
-  cfc_pull +discharge R a
-  exact fun i _ ↦ (hh i).star
+  conv_lhs => enter [2, i]; cfc_pull R a
+  cfc_pull +defer R a
+  case cfc_pull.side => exact fun i _ ↦ (hh i).star
 
 end GenericUnital
 
@@ -101,28 +101,28 @@ variable {R A : Type*} {p : A → Prop} [CommSemiring R] [Nontrivial R]
 
 example (ha : p a) :
     star a * a = cfcₙ (fun x : R ↦ star x * x) a := by
-  cfc_pull +discharge R a
+  cfc_pull R a
 
 example (ha : p a) (hf : ContinuousOn f (quasispectrum R a)) (hf0 : f 0 = 0)
     (hg : ContinuousOn g (quasispectrum R a)) (hg0 : g 0 = 0) :
     star (cfcₙ f a) + cfcₙ g a + a = cfcₙ (fun x ↦ star (f x) + g x + x) a := by
-  cfc_pull +discharge R a
+  cfc_pull R a
 
 example (ha : p a) :
     a * a + 3 • a * cfcₙ (id : R → R) a = cfcₙ (fun x : R ↦ x * x + 3 • x * x) a := by
-  cfc_pull +discharge R a
+  cfc_pull R a
 
 /- Note that `cfc_pull` produces `f (x * x)`, not `f (x ^ 2)`: it follows the shape of the term
 it is given, and there is no `cfcₙ_pow` to turn `a * a` into a square. -/
 example (ha : p a) (hf : ContinuousOn f ((fun x : R ↦ x * x) '' quasispectrum R a))
     (hf0 : f 0 = 0) :
     cfcₙ f (a * a) = cfcₙ (fun x ↦ f (x * x)) a := by
-  cfc_pull +discharge R a
+  cfc_pull R a
 
 example (ha : p a) (hf : Continuous f) (hf0 : f 0 = 0)
     (hg : ContinuousOn g (quasispectrum R a)) (hg0 : g 0 = 0) :
     cfcₙ f (cfcₙ g a * cfcₙ g a) = cfcₙ (fun x ↦ f (g x * g x)) a := by
-  cfc_pull +discharge R a
+  cfc_pull R a
 
 end GenericNonUnital
 
@@ -136,94 +136,94 @@ open scoped NNReal
 
 example (ha : IsStarNormal a) :
     NormedSpace.exp (I • a) = cfc (fun x ↦ Complex.exp (I • x)) a := by
-  cfc_pull +discharge ℂ a
+  cfc_pull ℂ a
 
 example (ha : IsSelfAdjoint a) :
     NormedSpace.exp a = cfc Real.exp a := by
-  cfc_pull +discharge ℝ a
+  cfc_pull ℝ a
 
 example (ha : 0 ≤ a) :
     CFC.sqrt a = cfcₙ NNReal.sqrt a := by
-  cfc_pull +discharge ℝ≥0 a
+  cfc_pull ℝ≥0 a
 
 /- Over `ℝ`, `CFC.sqrt` is pulled with `CFC.sqrt_eq_real_sqrt` rather than by converting the
 `ℝ≥0` calculus, which is why the function comes out as `Real.sqrt`. -/
 example (ha : 0 ≤ a) :
     1 - CFC.sqrt a = cfc (fun x ↦ 1 - √x) a := by
-  cfc_pull +discharge ℝ a
+  cfc_pull ℝ a
 
 /- Here `f` is arbitrary, so its continuity is a genuine side goal. -/
 example (ha : IsSelfAdjoint a) (f : ℝ≥0 → ℝ≥0) (hf0 : f 0 = 0)
     (hf : ContinuousOn f (quasispectrum ℝ≥0 (CFC.sqrt (a ^ 2)))) :
     CFC.sqrt (CFC.sqrt (a ^ 2)) + cfcₙ f (CFC.sqrt (a ^ 2)) =
       cfcₙ (fun x ↦ NNReal.sqrt x + f x) (CFC.sqrt (a ^ 2)) := by
-  cfc_pull +discharge
+  cfc_pull
 
 /- Pulling over `ℂ` a term whose natural home is the non-unital calculus over `ℝ`: `cfc_pull`
 uses `CFC.posPart_def`, then `cfcₙ_eq_cfc`, then `cfc_real_eq_complex`. -/
 example (ha : IsSelfAdjoint a) :
     a⁺ = cfc (fun z : ℂ ↦ (z.re⁺ : ℝ)) a := by
-  cfc_pull +discharge ℂ a
+  cfc_pull ℂ a
 
 /- `a⁺`/`a⁻`, keeping the non-unital `cfcₙ` head even in a unital algebra. -/
 example (ha : IsSelfAdjoint a) :
     a⁺ - a⁻ = cfcₙ (fun x : ℝ ↦ x⁺ - x⁻) a := by
-  cfc_pull +discharge -unital ℝ a
+  cfc_pull -unital ℝ a
 
 example :
     a⁺ * a⁻ = cfcₙ (fun x : ℝ ↦ x⁺ * x⁻) a := by
-  cfc_pull +discharge -unital ℝ a
+  cfc_pull -unital ℝ a
 
 /- Mixing the (non-unital) `a⁺` with the unital constant `1` forces a `cfc` head. -/
 example (ha : IsSelfAdjoint a) :
     1 - a⁺ = cfc (fun x : ℝ ↦ 1 - x⁺) a := by
-  cfc_pull +discharge ℝ a
+  cfc_pull ℝ a
 
 /- `CFC.abs`, pulled over its own scalar ring `ℝ≥0` at the base point `star a * a`. -/
 example (a : A) :
     CFC.abs a * CFC.abs a = cfcₙ (fun x : ℝ≥0 ↦ NNReal.sqrt x * NNReal.sqrt x) (star a * a) := by
-  cfc_pull +discharge ℝ≥0 (star a * a)
+  cfc_pull ℝ≥0 (star a * a)
 
 /- `a ^ (x : ℝ)`, pulled over `ℝ≥0`. `CFC.rpow_def` is definitional, so there is nothing to
 discharge here; the product below does need continuity, which `fun_prop` gets from `0 ≤ x`. -/
 example (a : A) (x : ℝ) :
     a ^ x = cfc (fun t : ℝ≥0 ↦ t ^ x) a := by
-  cfc_pull +discharge ℝ≥0 a
+  cfc_pull ℝ≥0 a
 
 example (ha : 0 ≤ a) (x y : ℝ) (hx : 0 ≤ x) (hy : 0 ≤ y) :
     a ^ x * a ^ y = cfc (fun t : ℝ≥0 ↦ t ^ x * t ^ y) a := by
-  cfc_pull +discharge ℝ≥0 a
+  cfc_pull ℝ≥0 a
 
 example (ha : 0 ≤ a) :
     CFC.sqrt a * CFC.sqrt a = cfcₙ (fun t : ℝ≥0 ↦ NNReal.sqrt t * NNReal.sqrt t) a := by
-  cfc_pull +discharge ℝ≥0 a
+  cfc_pull ℝ≥0 a
 
 example (ha : IsSelfAdjoint a) :
     NormedSpace.exp a * NormedSpace.exp a = cfc (fun x : ℝ ↦ Real.exp x * Real.exp x) a := by
-  cfc_pull +discharge ℝ a
+  cfc_pull ℝ a
 
 example (ha : IsStarNormal a) (z : ℂ) :
     NormedSpace.exp (z • a) = cfc (fun w : ℂ ↦ Complex.exp (z * w)) a := by
-  cfc_pull +discharge ℂ a
+  cfc_pull ℂ a
 
 /- `CFC.log` composed with `NormedSpace.exp`, pulled (not simplified away) into a single `cfc`. -/
 example (ha : IsSelfAdjoint a) :
     CFC.log (NormedSpace.exp a) = cfc (fun x : ℝ ↦ Real.log (Real.exp x)) a := by
-  cfc_pull +discharge ℝ a
+  cfc_pull ℝ a
 
 example (ha : IsSelfAdjoint a) :
     NormedSpace.exp (-a) * NormedSpace.exp a = cfc (fun x : ℝ ↦ Real.exp (-x) * Real.exp x) a := by
-  cfc_pull +discharge ℝ a
+  cfc_pull ℝ a
 
 /- Inversion in `Aˣ`, using the unital `cfc`. -/
 example (u : Aˣ) (ha : IsStarNormal (u : A)) :
     (↑u⁻¹ : A) = cfc (fun x : ℂ ↦ x⁻¹) (u : A) := by
-  cfc_pull +discharge ℂ (u : A)
+  cfc_pull ℂ (u : A)
 
 example (ha : IsStarNormal a) (f g : ℂ → ℂ)
     (hf : ContinuousOn f (spectrum ℂ a)) (hg : ContinuousOn g (spectrum ℂ a)) :
     cfc f a * cfc g a = cfc (fun z ↦ f z * g z) a := by
-  cfc_pull +discharge ℂ a
+  cfc_pull ℂ a
 
 end CStarAlgebra
 
@@ -236,65 +236,66 @@ open scoped NNReal
 
 example :
     a⁺ - a⁻ = cfcₙ (fun x : ℝ ↦ x⁺ - x⁻) a := by
-  cfc_pull +discharge ℝ a
+  cfc_pull ℝ a
 
 example :
     a⁺ * a⁻ = cfcₙ (fun x : ℝ ↦ x⁺ * x⁻) a := by
-  cfc_pull +discharge ℝ a
+  cfc_pull ℝ a
 
 example (a : A) :
     CFC.abs a = cfcₙ NNReal.sqrt (star a * a) := by
-  cfc_pull +discharge ℝ≥0 (star a * a)
+  cfc_pull ℝ≥0 (star a * a)
 
 example (ha : 0 ≤ a) :
     CFC.sqrt a * CFC.sqrt a = cfcₙ (fun t : ℝ≥0 ↦ NNReal.sqrt t * NNReal.sqrt t) a := by
-  cfc_pull +discharge ℝ≥0 a
+  cfc_pull ℝ≥0 a
 
 /- The element is `star a * a`, not `a` itself. -/
 example (a : A) (f : ℝ≥0 → ℝ≥0) (hf0 : f 0 = 0)
     (hf : ContinuousOn f (quasispectrum ℝ≥0 (star a * a))) :
     CFC.sqrt (star a * a) + cfcₙ f (star a * a) =
       cfcₙ (fun x ↦ NNReal.sqrt x + f x) (star a * a) := by
-  cfc_pull +discharge ℝ≥0 (star a * a)
+  cfc_pull ℝ≥0 (star a * a)
 
 example (ha : IsStarNormal a) (f g : ℂ → ℂ) (hf0 : f 0 = 0) (hg0 : g 0 = 0)
     (hf : ContinuousOn f (quasispectrum ℂ a)) (hg : ContinuousOn g (quasispectrum ℂ a)) :
     cfcₙ f a * cfcₙ g a = cfcₙ (fun z ↦ f z * g z) a := by
-  cfc_pull +discharge ℂ a
+  cfc_pull ℂ a
 
 /- The predicate `IsSelfAdjoint a` is genuinely needed here and is left to the user. -/
 example (ha : IsSelfAdjoint a) :
     (-a)⁺ = cfcₙ (fun x : ℝ ↦ (-x)⁺) a := by
-  cfc_pull +discharge ℝ a
+  cfc_pull ℝ a
 
 example (ha : 0 ≤ a) (y : ℝ≥0) (hy : y ≠ 0) :
     CFC.sqrt a * a ^ y = cfcₙ (fun t : ℝ≥0 ↦ NNReal.sqrt t * NNReal.nnrpow t y) a := by
-  cfc_pull +discharge ℝ≥0 a
+  cfc_pull ℝ≥0 a
 
 example (ha : IsSelfAdjoint a) (f : ℝ → ℝ) (hf0 : f 0 = 0)
     (hf : ContinuousOn f ((fun x : ℝ ↦ x⁺) '' quasispectrum ℝ a)) :
     cfcₙ f a⁺ = cfcₙ (fun x ↦ f (x⁺)) a := by
-  cfc_pull +discharge ℝ a
+  cfc_pull ℝ a
 
 example (ha : IsSelfAdjoint a) :
     (2 • a)⁺ = cfcₙ (fun x : ℝ ↦ (2 • x)⁺) a := by
-  cfc_pull +discharge ℝ a
+  cfc_pull ℝ a
 
 example (ha : IsStarNormal a) (z : ℂ) :
     z • star a = cfcₙ (fun w : ℂ ↦ z * star w) a := by
-  cfc_pull +discharge ℂ a
+  cfc_pull ℂ a
 
 end NonUnitalCStarAlgebra
 
 section MessySideGoals
 
-/-! ## Side goals that `+discharge` cannot close
+/-! ## Side goals the auto-param tactics cannot close
 
-`+discharge` runs `cfc_tac`, `cfc_cont_tac` and `cfc_zero_tac`, which between them handle
-continuity of everything `fun_prop` knows and the routine predicate goals. Plenty of side goals
-are outside that reach: continuity on a set that has to be located first, or a hypothesis about
-the values a function takes on the spectrum. Those come back to the user, and `cfc_pull` has
-already done the structural half of the work. -/
+`cfc_tac`, `cfc_cont_tac` and `cfc_zero_tac` between them handle continuity of everything
+`fun_prop` knows and the routine predicate goals. Plenty of side goals are outside that reach:
+continuity on a set that has to be located first, or a hypothesis about the values a function
+takes on the spectrum. Those are an error by default, and `+defer` hands them back — named, so
+that `case cfc_pull.continuity => ..` picks them out. `cfc_pull` has already done the structural
+half of the work. -/
 
 variable {A : Type*} [CStarAlgebra A] [PartialOrder A] [StarOrderedRing A]
 variable {a : A}
@@ -307,22 +308,22 @@ cannot discharge. It follows from `IsStrictlyPositive a`, but only after unfoldi
 even though `cfc_mul` asks for it on both factors: identical side goals are merged. -/
 example (ha : IsStrictlyPositive a) :
     CFC.log a * CFC.log a = cfc (fun x : ℝ ↦ Real.log x * Real.log x) a := by
-  cfc_pull +discharge ℝ a
-  exact Real.continuousOn_log.mono fun x hx h ↦ spectrum.zero_notMem ℝ ha.2 (h ▸ hx)
+  cfc_pull +defer ℝ a
+  case cfc_pull.continuity => exact Real.continuousOn_log.mono fun x hx h ↦ spectrum.zero_notMem ℝ ha.2 (h ▸ hx)
 
 /- The same story one ring down: `(· ^ x)` on `ℝ≥0` is continuous away from `0` when `x < 0`. -/
 example (ha : IsStrictlyPositive a) (x : ℝ) (hx : x < 0) :
     a ^ x * a ^ x = cfc (fun t : ℝ≥0 ↦ t ^ x * t ^ x) a := by
-  cfc_pull +discharge ℝ≥0 a
-  exact NNReal.continuousOn_rpow_const (.inl (spectrum.zero_notMem ℝ≥0 ha.2))
+  cfc_pull +defer ℝ≥0 a
+  case cfc_pull.continuity => exact NNReal.continuousOn_rpow_const (.inl (spectrum.zero_notMem ℝ≥0 ha.2))
 
 /- Not every side goal is a continuity goal: `cfc_inv` needs the function to be nonvanishing on
 the spectrum, which here takes a hypothesis about the spectrum's location. -/
 example (ha : IsSelfAdjoint a) (f : ℝ → ℝ) (hf : Continuous f)
     (hspec : spectrum ℝ a ⊆ Set.Icc (-1) 1) (hf0 : ∀ x ∈ Set.Icc (-1 : ℝ) 1, f x ≠ 0) :
     Ring.inverse (cfc f a) = cfc (fun x : ℝ ↦ (f x)⁻¹) a := by
-  cfc_pull +discharge ℝ a
-  exact fun x hx ↦ hf0 x (hspec hx)
+  cfc_pull +defer ℝ a
+  case cfc_pull.side => exact fun x hx ↦ hf0 x (hspec hx)
 
 end MessySideGoals
 
@@ -341,15 +342,15 @@ variable {a : A}
 open scoped NNReal
 
 example (ha : 0 ≤ a) : CFC.sqrt a * CFC.sqrt a = a := by
-  cfc_pull +discharge ℝ≥0 a
+  cfc_pull ℝ≥0 a
   exact cfc_congr fun x _ ↦ NNReal.mul_self_sqrt x
 
 example (ha : IsSelfAdjoint a) : CFC.log (NormedSpace.exp a) = a := by
-  cfc_pull +discharge ℝ a
+  cfc_pull ℝ a
   exact cfc_congr fun x _ ↦ Real.log_exp x
 
 example (ha : IsSelfAdjoint a) : a⁺ - a⁻ = a := by
-  cfc_pull +discharge ℝ a
+  cfc_pull ℝ a
   exact cfc_congr fun x _ ↦ by simp
 
 end RealTheorems
@@ -366,7 +367,7 @@ open scoped NNReal
 
 example [Nontrivial A] (ha : IsSelfAdjoint a) :
     a + I • cfcₙ Real.sqrt (1 - a ^ 2) = cfc (fun x ↦ x + I * ↑√(1 - x.re ^ 2)) a := by
-  cfc_pull +discharge ℂ a
+  cfc_pull ℂ a
 
 /- `cfc_pull` converts from the non-unital calculus over `ℝ` to the unital one over `ℂ`. It does
 not close the goal: it produces `fun x ↦ x + I * ↑√(1 - x.re ^ 2)`, whereas the statement asks
@@ -374,7 +375,7 @@ for `fun x ↦ ↑x.re + I * ↑√(1 - x.re ^ 2)`. Both are correct — `a` is 
 functions agree on `spectrum ℂ a` — and closing the gap is exactly the job of `cfc_congr`. -/
 example [Nontrivial A] (ha : IsSelfAdjoint a) (ha_norm : ‖a‖ ≤ 1) :
     a + I • cfcₙ Real.sqrt (1 - a ^ 2) = cfc (fun x ↦ ↑x.re + I * ↑√(1 - x.re ^ 2)) a := by
-  cfc_pull +discharge ℂ a
+  cfc_pull ℂ a
   refine cfc_congr fun x hx ↦ ?_
   rw [← SpectrumRestricts.real_iff.mp ha.spectrumRestricts _ hx]
 
@@ -382,11 +383,11 @@ example [Nontrivial A] (ha : IsSelfAdjoint a) (ha_norm : ‖a‖ ≤ 1) :
 whose hypothesis `0 ≤ 1 - a ^ 2` becomes a side goal. -/
 example [Nontrivial A] (ha : IsSelfAdjoint a) (ha_norm : ‖a‖ ≤ 1) :
     a + I • CFC.sqrt (1 - a ^ 2) = cfc (fun x ↦ ↑x.re + I * ↑√(1 - x.re ^ 2)) a := by
-  cfc_pull +discharge ℂ a
+  cfc_pull +defer ℂ a
   · refine cfc_congr fun x hx ↦ ?_
     rw [← SpectrumRestricts.real_iff.mp ha.spectrumRestricts _ hx]
   · -- the side goal `0 ≤ 1 - a ^ 2` left by `CFC.sqrt_eq_real_sqrt`
-    have key : (1 : A) - a ^ 2 = cfc (fun x : ℝ ↦ 1 - x ^ 2) a := by cfc_pull +discharge ℝ a
+    have key : (1 : A) - a ^ 2 = cfc (fun x : ℝ ↦ 1 - x ^ 2) a := by cfc_pull ℝ a
     rw [key]
     refine cfc_nonneg fun x hx ↦ ?_
     have hx' : |x| ≤ 1 := by

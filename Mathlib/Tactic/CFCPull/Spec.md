@@ -81,9 +81,8 @@ conv ... => cfc_pull (config)? (R)? (a)?
     `+unital` the tactic uses `cfc` whenever a unital `ContinuousFunctionalCalculus R A p`
     instance exists, and silently falls back to `cfcₙ` when it does not (e.g. in a non-unital
     algebra). With `-unital` the tactic always produces `cfcₙ`.
-  * `+discharge` (default `false`). Attempt to close the collected side goals with the standard
-    auto-param tactics (`cfc_tac`, `cfc_cont_tac`, `cfc_zero_tac`), chosen by the shape of the
-    goal. Off by default, per the original spec; see [§7](#7-side-goals).
+  * `+defer` (default `false`). Return the side goals that could not be discharged instead of
+    failing; see [§7](#7-side-goals).
   * `(maxDepth := n)` (default `48`), a recursion-depth guard.
 
 ### Behaviour on the goal
@@ -98,7 +97,7 @@ the result (which closes goals like `star a * a = cfc (fun x ↦ star x * x) a` 
 In `conv` mode the current `conv` target is pulled, which gives the user complete control over
 *where* the pull happens; this replaces the "pattern" idea in the original draft, at no cost in
 expressiveness and with no new syntax to learn. Note that a `conv` block cannot end with unsolved
-goals, so in `conv` mode a surviving side goal is an error; `+discharge` is usually wanted there.
+goals, so in `conv` mode a surviving side goal is an error and `+defer` is of no use there.
 This is not specific to `cfc_pull` — `rw` inside `conv` behaves the same way.
 
 ## 3. Scalar rings
@@ -306,17 +305,22 @@ goal. The tactic handles them as follows.
   metavariable (§4).
 * Everything else — `ContinuousOn f (spectrum R a)`, `ContinuousOn f (σₙ R a)`, `f 0 = 0`,
   `∀ x ∈ spectrum R a, f x ≠ 0`, … — becomes a fresh synthetic-opaque metavariable, `autoParam`
-  wrappers stripped so the goal displays cleanly.
+  wrappers stripped so the goal displays cleanly, and **named after its kind**:
+  `cfc_pull.predicate`, `cfc_pull.continuity`, `cfc_pull.mapZero` or `cfc_pull.side`. The name
+  lets the user address a whole group at once with `case cfc_pull.continuity => fun_prop`.
 * Once the whole pull is finished (so that no function metavariables remain), the frontend
-  tries `assumption` on each collected goal, and, if `+discharge` was given, the appropriate
-  auto-param tactic (`cfc_cont_tac` for `ContinuousOn`, `cfc_zero_tac` for an equation,
-  `cfc_predicate`/`cfcₙ_predicate` followed by `cfc_tac` otherwise — the predicate lemmas come
-  first because `cfc_tac` never fails, and they are what closes goals like `p (cfc g a)` coming
-  from the inner element of a composition).
-* Surviving goals are returned to the user, after the main goal, in the order they were created.
+  deduplicates the goals and tries, on each: `assumption`, then the auto-param tactic the
+  calculus API itself would use for a hypothesis of that kind (`cfc_cont_tac` for continuity,
+  `cfc_zero_tac` for `f 0 = 0`, and for the rest `cfc_predicate`/`cfcₙ_predicate` followed by
+  `cfc_tac` — in that order, because `cfc_tac` never fails).
+* Anything still open is **an error**, listing the goals. With `+defer` they are returned and
+  added to the goal list after the main goal instead.
 
-Grouping the goals into conjunctions or giving them user-visible case names is left to a later
-iteration, as the draft suggests.
+Note that `+defer` does not switch the discharging off; it only changes what happens to the
+survivors. The reason is that "discharge the easy ones and hand me the rest" is by far the most
+useful behaviour, and it is what the messy examples in `MathlibTest/CFCPull/Examples.lean` rely
+on. If you want to see the raw side goals, `set_option trace.Tactic.cfc_pull true` reports each
+one as it is created and what became of it.
 
 ## 8. Worked examples
 
@@ -349,7 +353,7 @@ after replacing them the pattern is `?x₁ * ?x₂`, which unifies with `star a 
 plus the shared `p a`.
 
 Both sides now read `cfc (fun x ↦ star x * x) a`, so the main goal is closed by `rfl` and only
-the side goals remain (all closed by `cfc_pull +discharge R a`, or by `<;> fun_prop`).
+the side goals remain, and all of them are discharged automatically.
 
 ### 8.2 Changing scalar ring and unitality
 
@@ -491,8 +495,8 @@ conversions applied.
   requested ring as soon as it is produced, which can convert twice where once would do (e.g.
   `a⁺ - a⁻` at `ℂ` converts each summand rather than the difference). A later iteration could
   run an inference pass first to pick, for each node, the largest ring that works.
-* **Side-goal ergonomics.** Grouping `ContinuousOn` goals into a single conjunction, or naming
-  goal groups so they can be addressed with `case ... => fun_prop`.
+* **Side-goal ergonomics.** Grouping `ContinuousOn` goals into a single conjunction. (Naming the
+  groups is done: see §7.)
 * **Building `ContinuousOn` proofs during the traversal** rather than deferring them.
 * **Recursing under a binder** (`cfc_sum`, `cfc_apply_pi`) — for which there is a good workaround,
   so this may never need doing.
@@ -503,8 +507,8 @@ conversions applied.
   ```lean
   example (ha : p a) (hg : ∀ i, ContinuousOn (g i) (spectrum R a)) :
       ∑ i ∈ s, star (cfc (g i) a) = cfc (∑ i ∈ s, fun x ↦ star (g i x)) a := by
-    conv_lhs => enter [2, i]; cfc_pull +discharge R a
-    cfc_pull +discharge R a
+    conv_lhs => enter [2, i]; cfc_pull R a
+    cfc_pull +defer R a
   ```
 
   The first line pulls each summand to `cfc (fun x ↦ star (g i x)) a`; the second lets `cfc_sum`
@@ -539,6 +543,6 @@ conversions applied.
   `Mathlib/Tactic/CFCPull/Lemmas.lean` to the declaration sites, along with the three `rfl`
   lemmas that file adds.
 * **Side goals in `conv` mode.** `conv` cannot carry unsolved goals out of a block, so anything
-  `+discharge` fails to close is an error there. Some `conv` tactics (`equals`) let the user
-  prove the obligation inline; whether something similar makes sense for `cfc_pull` has not been
-  investigated.
+  the auto-param tactics fail to close is an error there, and `+defer` cannot help. Some `conv`
+  tactics (`equals`) let the user prove the obligation inline; whether something similar makes
+  sense for `cfc_pull` has not been investigated.

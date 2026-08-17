@@ -213,7 +213,10 @@ metavariable becomes a goal its type is passed through `consumeAutoParam` so the
 For each undischarged metavariable in order:
 
 1. if its type is defeq to `p a` for the lemma's mode, assign the cached shared `?ha`;
-2. otherwise convert it to a synthetic-opaque metavariable and push it onto `State.sideGoals`.
+2. otherwise convert it to a synthetic-opaque metavariable, named after its `SideGoalKind`
+   (`cfc_pull.continuity`, `cfc_pull.mapZero`, …), and push it onto `State.sideGoals`. The name
+   is both what the user sees in `case cfc_pull.continuity => …` and how the frontend later
+   works out which auto-param tactic to try.
 
 (Natural metavariables cannot be returned as goals directly; the routine creates a fresh
 synthetic-opaque one of the same type and assigns the natural one to it.)
@@ -222,9 +225,9 @@ synthetic-opaque one of the same type and assigns the natural one to it.)
 
 ```lean
 structure Config where
-  unital    : Bool := true    -- prefer the unital calculus
-  discharge : Bool := false   -- run cfc_tac/cfc_cont_tac/cfc_zero_tac on side goals
-  maxDepth  : Nat  := 48
+  unital   : Bool := true    -- prefer the unital calculus
+  defer    : Bool := false   -- hand back undischarged side goals instead of failing
+  maxDepth : Nat  := 48
 declare_config_elab elabConfig Config
 ```
 
@@ -240,10 +243,12 @@ Tactic mode:
 * run `pull` on each, tolerating individual failures;
 * rebuild the target with `mkCongr`/`mkCongrArg` over the relation, close the old goal with
   `mkEqMPR`, and `try rfl` on the new one;
-* post-process side goals (`assumption`, then optionally the auto-param tactics), and
-  `setGoals` with what survives, main goal first.
+* post-process the side goals (deduplicate, `assumption`, then the auto-param tactic for the
+  goal's kind, which is recovered from the name the goal was given), erroring on the survivors
+  unless `+defer` was given.
 
-Conv mode: `Conv.getLhs`, run `pull`, `Conv.updateLhs newLhs proof`, then append the side goals.
+Conv mode: `Conv.getLhs`, run `pull`, `Conv.updateLhs newLhs proof`, then append the side goals —
+though `conv` refuses to end with any, so in practice they must all be discharged.
 
 ## 4a. Two things the first design got wrong
 
@@ -277,7 +282,7 @@ expected.
    §8.1 of `Spec.md` (`star a * a`).
 4. **Conversions** — `Unital` and `Scalar`, with the BFS. Target: §8.2 (`a⁺` over `ℂ`).
 5. **Composition** — step 2 of the algorithm plus the `Compose` index. Target: §8.3.
-6. **Frontend polish** — inference of `R`/`a`, conv mode, `+discharge`, tracing.
+6. **Frontend polish** — inference of `R`/`a`, conv mode, side-goal discharging, tracing.
 7. **Lemma tagging** — work through `Spec.md` §9 and `Examples.lean`, fixing what breaks.
 
 Each milestone is a commit; `MathlibTest/CFCPull/Examples.lean` is the running test suite and is

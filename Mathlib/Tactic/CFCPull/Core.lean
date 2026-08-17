@@ -36,9 +36,12 @@ structure Config where
   algebra carries a unital continuous functional calculus and silently falls back to `cfcₙ`
   otherwise; when `false` it always produces `cfcₙ`. -/
   unital : Bool := true
-  /-- Attempt to discharge the side goals with the standard auto-param tactics `cfc_tac`,
-  `cfc_cont_tac` and `cfc_zero_tac`. -/
-  discharge : Bool := false
+  /-- Hand back the side goals that could not be discharged, instead of failing.
+
+  `cfc_pull` always tries to discharge the hypotheses of the lemmas it uses, with `assumption`
+  and then the standard auto-param tactics `cfc_tac`, `cfc_cont_tac` and `cfc_zero_tac`. By
+  default anything left over is an error; with `+defer` it is returned as a goal instead. -/
+  defer : Bool := false
   /-- The maximum recursion depth. -/
   maxDepth : Nat := 48
   deriving Inhabited
@@ -145,18 +148,54 @@ def withIncDepth {α : Type} (x : PullM α) : PullM α := do
 
 /-- Strip an `autoParam` wrapper, so that a deferred goal displays as the user expects. -/
 def stripAutoParam (e : Expr) : Expr :=
-  if e.isAppOfArity ``autoParam 2 then e.appFn!.appArg! else e
+  if e.isAutoParam then e.appFn!.appArg! else e
 
-/-- Register a new side goal of the given type. -/
-def newSideGoal (type : Expr) : PullM Expr := do
-  let g ← mkFreshExprSyntheticOpaqueMVar type (tag := `cfc_pull)
+/-- What kind of hypothesis a side goal came from. This drives both the name the goal is given
+(so that `case cfc_pull.continuity => fun_prop` addresses all of them at once) and the auto-param
+tactic used to try to discharge it. -/
+inductive SideGoalKind where
+  /-- The predicate `p a` of the calculus. -/
+  | predicate
+  /-- Continuity of a function on a spectrum. -/
+  | continuity
+  /-- `f 0 = 0`, required by the non-unital calculus. -/
+  | mapZero
+  /-- Anything else, e.g. `∀ x ∈ spectrum R a, f x ≠ 0`. -/
+  | other
+  deriving Inhabited, BEq, Repr
+
+/-- Classify a side goal by its statement. `ContinuousOn` is matched by name because this file
+deliberately does not import the analysis library. -/
+def SideGoalKind.ofType (type : Expr) : SideGoalKind :=
+  if type.isAppOf `ContinuousOn then .continuity
+  else if type.isAppOf ``Eq then .mapZero
+  else .other
+
+/-- The name a deferred goal of this kind is given. -/
+def SideGoalKind.tag : SideGoalKind → Name
+  | .predicate => `cfc_pull.predicate
+  | .continuity => `cfc_pull.continuity
+  | .mapZero => `cfc_pull.mapZero
+  | .other => `cfc_pull.side
+
+/-- Recover the kind of a side goal from the name it was given. -/
+def SideGoalKind.ofTag (tag : Name) : SideGoalKind :=
+  if tag == SideGoalKind.predicate.tag then .predicate
+  else if tag == SideGoalKind.continuity.tag then .continuity
+  else if tag == SideGoalKind.mapZero.tag then .mapZero
+  else .other
+
+/-- Register a new side goal of the given type, named after its kind. -/
+def newSideGoal (type : Expr) (kind : SideGoalKind) : PullM Expr := do
+  let g ← mkFreshExprSyntheticOpaqueMVar type (tag := kind.tag)
   modify fun s => { s with sideGoals := s.sideGoals.push g.mvarId! }
   return g
 
 /-- Build the application `C args ..`, synthesising the instance arguments of the class `C`.
 
-Unlike `mkAppM`, this fills in instance arguments that come *after* the last explicit argument,
-which is exactly the shape of `ContinuousFunctionalCalculus R A p [CommSemiring R] ⋯`. -/
+Neither `mkAppM` nor `mkAppOptM` will do: both stop at the last explicit argument, whereas the
+instance arguments of `ContinuousFunctionalCalculus R A p [CommSemiring R] ⋯` come after it, so
+they return a partial application on which `synthInstance` then fails. -/
 def mkClassApp (clsName : Name) (args : Array Expr) : MetaM Expr := do
   let info ← getConstInfo clsName
   let lvls ← info.levelParams.mapM fun _ => mkFreshLevelMVar
@@ -195,19 +234,17 @@ def getPredicate (mode : Mode) : PullM Expr := do
   let ctx ← read
   let p ← mkFreshExprMVar (← mkArrow ctx.alg (.sort .zero))
   let clsName := if mode.unital then cfcClassName else cfcₙClassName
-  let cls ← try mkClassApp clsName #[mode.ring, ctx.alg, p]
-    catch _ =>
-      throwError "`cfc_pull` could not even state `{clsName} {mode.ring} {ctx.alg} _`; the \
-        algebra is missing some of the structure the continuous functional calculus needs"
-  let _ ←
-    try synthInstance cls
-    catch _ =>
-      throwError "`cfc_pull`: `{ctx.alg}` has no {if mode.unital then "" else "non-unital "}\
-        continuous functional calculus over `{mode.ring}`"
+  let noCalculus {α : Type} : PullM α :=
+    throwError "`cfc_pull`: `{ctx.alg}` has no {if mode.unital then "" else "non-unital "}\
+      continuous functional calculus over `{mode.ring}`"
+  let cls ← try mkClassApp clsName #[mode.ring, ctx.alg, p] catch _ => noCalculus
+  try
+    discard <| synthInstance cls
+  catch _ => noCalculus
   let pred ← instantiateMVars p
   if pred.hasExprMVar then
-    throwError "`cfc_pull` could not determine the predicate of the continuous functional \
-      calculus for {mode}"
+    throwError "`cfc_pull` could not determine the predicate of the continuous\n\
+      functional calculus for {mode}"
   trace[Tactic.cfc_pull] "predicate for {mode} is {pred}"
   modify fun s => { s with predicates := s.predicates.push { mode, pred } }
   return pred
@@ -219,7 +256,7 @@ def getPredicateProof (mode : Mode) : PullM Expr := do
   let some i ← findPredicateIdx mode | throwError "internal error: missing predicate cache entry"
   let pi := (← get).predicates[i]!
   if let some prf := pi.proof? then return prf
-  let prf ← newSideGoal (mkApp pi.pred (← read).elem)
+  let prf ← newSideGoal (mkApp pi.pred (← read).elem) .predicate
   modify fun s => { s with predicates := s.predicates.set! i { pi with proof? := some prf } }
   return prf
 
@@ -258,7 +295,7 @@ def collectHypotheses (declName : Name) (mvars : Array Expr) (bis : Array Binder
       mvarId.assign (← getPredicateProof mode)
       trace[Tactic.cfc_pull] "`{declName}`: filled `{type}` from the shared predicate proof"
     else
-      mvarId.assign (← newSideGoal type)
+      mvarId.assign (← newSideGoal type (.ofType type))
       trace[Tactic.cfc_pull] "`{declName}`: deferred `{type}`"
 
 /-- Test whether an expression is an unassigned metavariable, i.e. a variable of the lemma being
@@ -603,8 +640,8 @@ def runPull (cfg : Config) (R elem e : Expr) : MetaM (Expr × Expr × Array MVar
     catch ex =>
       if let .internal id _ := ex then
         if id == maxDepthExceptionId then
-          throwError "`cfc_pull` reached its maximum recursion depth of {cfg.maxDepth}; either \
-            the expression is more deeply nested than that, or the `@[cfc_pull]` lemma set is \
+          throwError "`cfc_pull` reached its maximum recursion depth of {cfg.maxDepth}; either\n\
+            the expression is more deeply nested than that, or the `@[cfc_pull]` lemma set is\n\
             looping. Raise the limit with `cfc_pull (maxDepth := {2 * cfg.maxDepth}) ..`"
       throw ex
   let goals ← st.sideGoals.filterM fun g => return !(← g.isAssigned)

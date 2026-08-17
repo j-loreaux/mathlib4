@@ -40,44 +40,53 @@ def tryTacticOn (g : MVarId) (tac : TSyntax `tactic) : TacticM Bool := do
   s.restore
   return false
 
-/-- The auto-param tactic appropriate to a side goal: `cfc_cont_tac` for continuity goals,
-`cfc_zero_tac` for goals of the form `f 0 = 0`, and `cfc_tac` for everything else (in practice,
-for the predicate `p a`). -/
-def autoParamTacticFor (g : MVarId) : MetaM (TSyntax `tactic) := do
-  let type ← whnfR (← g.getType)
-  if type.isAppOf `ContinuousOn then
-    `(tactic| cfc_cont_tac)
-  else if type.isAppOf ``Eq then
-    `(tactic| cfc_zero_tac)
-  else
+/-- The auto-param tactic that the continuous functional calculus API itself would use for a
+hypothesis of this kind. -/
+def SideGoalKind.tactic : SideGoalKind → MetaM (TSyntax `tactic)
+  | .continuity => `(tactic| cfc_cont_tac)
+  | .mapZero => `(tactic| cfc_zero_tac)
+  | .predicate | .other =>
     -- `cfc_predicate` closes the predicate goals for the inner element of a composition, e.g.
     -- `p (cfc g a)`; the identifiers are built unresolved so that they are looked up in the
-    -- user's environment rather than in this file's.
-    -- note that `cfc_tac` never fails, so it has to come last
+    -- user's environment rather than in this file's.  Note that `cfc_tac` never fails, so it
+    -- has to come last.
     `(tactic| first
       | exact $(mkIdent `cfc_predicate) _ _
       | exact $(mkIdent `cfcₙ_predicate) _ _
       | cfc_tac)
 
-/-- Try to close the collected side goals: `assumption` always, and the standard auto-param
-tactics when `+discharge` was given. Duplicates are merged, which matters because the two sides
-of a relation are pulled independently and so tend to ask for the same predicate twice. Returns
-the goals that survive. -/
+/-- Try to close the side goals raised by the pull: `assumption` first, then the auto-param
+tactic for the goal's kind. Duplicates are merged, which matters because the two sides of a
+relation are pulled independently and so tend to ask for the same predicate twice.
+
+Whatever survives is an error unless `+defer` was given, in which case it is returned to be added
+to the goal list. -/
 def postProcessSideGoals (cfg : Config) (goals : Array MVarId) : TacticM (Array MVarId) := do
   let mut out := #[]
   for g in goals do
     if ← g.isAssigned then continue
-    -- merge with an earlier goal of the same type
     let type ← instantiateMVars (← g.getType)
+    -- merge with an earlier goal of the same type
     if ← out.anyM fun g' => do
         if ← withReducible <| isDefEq type (← g'.getType) then
           g.assign (mkMVar g'); return true
         else return false then
+      trace[Tactic.cfc_pull] "side goal `{type}` is a duplicate"
       continue
-    if ← g.assumptionCore then continue
-    if cfg.discharge then
-      if ← tryTacticOn g (← autoParamTacticFor g) then continue
+    if ← g.assumptionCore then
+      trace[Tactic.cfc_pull] "{checkEmoji} closed `{type}` with `assumption`"
+      continue
+    let tac ← (SideGoalKind.ofTag (← g.getTag)).tactic
+    if ← tryTacticOn g tac then
+      trace[Tactic.cfc_pull] "{checkEmoji} closed `{type}` with `{tac}`"
+      continue
+    trace[Tactic.cfc_pull] "{crossEmoji} could not close `{type}`"
     out := out.push g
+  unless cfg.defer || out.isEmpty do
+    throwError "`cfc_pull` rewrote the goal but could not discharge \
+      {out.size} side goal{if out.size == 1 then "" else "s"}:\
+      {indentD (goalsToMessageData out.toList)}\n\
+      Use `cfc_pull +defer ..` to have them added to the goal list instead."
   return out
 
 /-! ### Determining the scalar ring and the element -/
@@ -108,8 +117,9 @@ def inferCFCApp (target : Expr) : MetaM CFCApp := do
     if let some c := findCFCApp? arg then
       return c
   if let some c := findCFCApp? target then return c
-  throwError "`cfc_pull` could not find an application of `cfc` or `cfcₙ` in the goal from which \
-    to read off the scalar ring and the element; supply them explicitly, as in `cfc_pull ℝ a`"
+  throwError "`cfc_pull` could not find an application of `cfc` or `cfcₙ` in the goal from\n\
+    which to read off the scalar ring and the element; supply them explicitly, as in\n\
+    `cfc_pull ℝ a`"
 
 /-! ### The tactic -/
 
@@ -213,14 +223,25 @@ example (ha : p a) : star a * a = cfc (fun x : R ↦ star x * x) a := by
 Both arguments are optional: `cfc_pull` on its own reads the scalar ring and the element off an
 application of `cfc`/`cfcₙ` already present in the goal, preferring the right-hand side.
 
-The hypotheses of the lemmas used along the way (continuity of the functions on the spectrum,
-`f 0 = 0` in the non-unital case, and the predicate `p a`) are returned as side goals, after the
-main goal; `assumption` is tried on each of them first. Configuration:
+The lemmas used along the way have hypotheses — continuity of the functions on the spectrum,
+`f 0 = 0` in the non-unital case, and the predicate `p a` — and `cfc_pull` discharges them with
+`assumption` and then with the auto-param tactic the calculus API itself uses (`cfc_cont_tac`,
+`cfc_zero_tac`, `cfc_tac`). Anything left over is an error; `+defer` turns those into goals
+instead, named after what they are, so that they can be addressed in groups:
+
+```lean
+example (ha : IsStrictlyPositive a) :
+    CFC.log a * CFC.log a = cfc (fun x : ℝ ↦ Real.log x * Real.log x) a := by
+  cfc_pull +defer ℝ a
+  case cfc_pull.continuity => exact Real.continuousOn_log.mono fun x hx h ↦ ...
+```
+
+Configuration:
 
 * `+unital` / `-unital` (default `+unital`): prefer the unital calculus `cfc`, or force the
   non-unital `cfcₙ`. With `+unital` the tactic falls back to `cfcₙ` in an algebra with no unital
   functional calculus.
-* `+discharge`: also try `cfc_tac`, `cfc_cont_tac` and `cfc_zero_tac` on the side goals.
+* `+defer`: return the side goals that could not be discharged instead of failing.
 * `(maxDepth := n)`: the recursion depth limit.
 
 In `conv` mode, `cfc_pull` acts on the current `conv` target, which is the way to pull at a
@@ -228,20 +249,19 @@ specific position:
 
 ```lean
 example : star a * a + b = cfc (fun x : R ↦ star x * x) a + b := by
-  conv_lhs => cfc_pull +discharge R a
+  conv_lhs => cfc_pull R a
 ```
 
 A `conv` block cannot end with unsolved goals — the same restriction that `rw` inside `conv` is
-subject to — so in `conv` mode any surviving side goal is an error. Use `+discharge`, or arrange
-for the hypotheses to be in context so that `assumption` finds them.
+subject to — so `+defer` is of no use there.
 
 Going under a binder is `conv`'s job rather than the tactic's, which makes sums and the like a
 two-step affair:
 
 ```lean
 example : ∑ i ∈ s, star (cfc (g i) a) = cfc (∑ i ∈ s, fun x ↦ star (g i x)) a := by
-  conv_lhs => enter [2, i]; cfc_pull +discharge R a
-  cfc_pull +discharge R a
+  conv_lhs => enter [2, i]; cfc_pull R a
+  cfc_pull R a
 ```
 
 The lemmas the tactic uses are those tagged `@[cfc_pull]`; `set_option trace.Tactic.cfc_pull

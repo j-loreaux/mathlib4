@@ -37,7 +37,9 @@ example (ha : IsStarNormal a) : (2 : ℕ) = 2 := by
   cfc_pull ℂ a
 
 /--
-error: `cfc_pull` could not find an application of `cfc` or `cfcₙ` in the goal from which to read off the scalar ring and the element; supply them explicitly, as in `cfc_pull ℝ a`
+error: `cfc_pull` could not find an application of `cfc` or `cfcₙ` in the goal from
+which to read off the scalar ring and the element; supply them explicitly, as in
+`cfc_pull ℝ a`
 -/
 #guard_msgs in
 example (ha : IsStarNormal a) : star a * a = star a * a := by
@@ -55,7 +57,7 @@ example (ha : IsStarNormal a) : star a * a = cfc (fun x : ℂ ↦ star x * x) a 
 
 /--
 error: `cfc_pull` made no progress
-  `cfc_pull` could not even state `NonUnitalContinuousFunctionalCalculus ℚ A _`; the algebra is missing some of the structure the continuous functional calculus needs
+  `cfc_pull`: `A` has no non-unital continuous functional calculus over `ℚ`
 -/
 #guard_msgs in
 example (ha : IsStarNormal a) : star a * a = star a * a := by
@@ -81,7 +83,9 @@ example (ha : IsStarNormal a) : star b * b = star b * b := by
 
 /--
 error: `cfc_pull` made no progress
-  `cfc_pull` reached its maximum recursion depth of 1; either the expression is more deeply nested than that, or the `@[cfc_pull]` lemma set is looping. Raise the limit with `cfc_pull (maxDepth := 2) ..`
+  `cfc_pull` reached its maximum recursion depth of 1; either
+  the expression is more deeply nested than that, or the `@[cfc_pull]` lemma set is
+  looping. Raise the limit with `cfc_pull (maxDepth := 2) ..`
 -/
 #guard_msgs in
 example (ha : IsStarNormal a) : star a * a = star a * a := by
@@ -95,6 +99,65 @@ error: `cfc_pull` made no progress
 #guard_msgs in
 example (ha : IsSelfAdjoint a) : a⁺ = a⁺ := by
   cfc_pull ℝ≥0 a
+
+/- Side goals that neither `assumption` nor the auto-param tactics can close are an error unless
+`+defer` is given. -/
+/--
+error: `cfc_pull` rewrote the goal but could not discharge 2 side goals:
+  case cfc_pull.continuity
+  A : Type u_1
+  inst✝² : CStarAlgebra A
+  inst✝¹ : PartialOrder A
+  inst✝ : StarOrderedRing A
+  a b : A
+  ha : IsStarNormal a
+  f g : ℂ → ℂ
+  ⊢ ContinuousOn f (spectrum ℂ a)
+
+  case cfc_pull.continuity
+  A : Type u_1
+  inst✝² : CStarAlgebra A
+  inst✝¹ : PartialOrder A
+  inst✝ : StarOrderedRing A
+  a b : A
+  ha : IsStarNormal a
+  f g : ℂ → ℂ
+  ⊢ ContinuousOn g (spectrum ℂ a)
+Use `cfc_pull +defer ..` to have them added to the goal list instead.
+-/
+#guard_msgs (whitespace := lax) in
+example (ha : IsStarNormal a) (f g : ℂ → ℂ) :
+    cfc f a * cfc g a = cfc (fun x ↦ f x * g x) a := by
+  cfc_pull ℂ a
+
+/- `+defer` does not help inside `conv`, which cannot end with unsolved goals — the same
+restriction that `rw` inside `conv` is subject to. -/
+/--
+error: Tactic `conv` failed: There are unsolved goals
+case cfc_pull.continuity
+A : Type u_1
+inst✝² : CStarAlgebra A
+inst✝¹ : PartialOrder A
+inst✝ : StarOrderedRing A
+a b : A
+ha : IsStarNormal a
+f g : ℂ → ℂ
+⊢ ContinuousOn f (spectrum ℂ a)
+
+case cfc_pull.continuity
+A : Type u_1
+inst✝² : CStarAlgebra A
+inst✝¹ : PartialOrder A
+inst✝ : StarOrderedRing A
+a b : A
+ha : IsStarNormal a
+f g : ℂ → ℂ
+⊢ ContinuousOn g (spectrum ℂ a)
+-/
+#guard_msgs in
+example (ha : IsStarNormal a) (f g : ℂ → ℂ) :
+    cfc f a * cfc g a + b = cfc (fun x ↦ f x * g x) a + b := by
+  conv_lhs => arg 1; cfc_pull +defer ℂ a
 
 end Tactic
 
@@ -113,7 +176,8 @@ variable {R A : Type*} {p : A → Prop} [CommSemiring R]
 
 omit [Ring A] [StarRing A] [TopologicalSpace A] in
 /--
-error: @[cfc_pull] failed: neither side of `cfcPullTest.noCFC` has `cfc` or `cfcₙ` as its head symbol.
+error: @[cfc_pull] failed: neither side of `cfcPullTest.noCFC` has `cfc` or `cfcₙ`
+as its head symbol:
   ?a = ?a
 -/
 #guard_msgs in
@@ -121,7 +185,8 @@ error: @[cfc_pull] failed: neither side of `cfcPullTest.noCFC` has `cfc` or `cfc
 
 
 /--
-error: @[cfc_pull] failed: both sides of `cfcPullTest.sameSides` are applications of the same functional calculus to the same element; there is nothing for `cfc_pull` to do.
+error: @[cfc_pull] failed: both sides of `cfcPullTest.sameSides` are applications of the same
+functional calculus to the same element; there is nothing for `cfc_pull` to do.
 -/
 #guard_msgs in
 @[cfc_pull]
@@ -129,7 +194,8 @@ theorem cfcPullTest.sameSides (f : R → R) (a : A) : cfc f a = cfc f a := rfl
 
 
 /--
-error: @[cfc_pull] failed: `cfcPullTest.equalSizes` looks like a composition lemma, but neither side applies the functional calculus to a more complicated element than the other.
+error: @[cfc_pull] failed: `cfcPullTest.equalSizes` looks like a composition lemma, but neither
+side applies the functional calculus to a more complicated element than the other.
 -/
 #guard_msgs in
 @[cfc_pull]
@@ -137,7 +203,8 @@ theorem cfcPullTest.equalSizes (f : R → R) (a b : A) (h : a = b) : cfc f a = c
 
 
 /--
-error: @[cfc_pull] failed: the non-`cfc` side of `cfcPullTest.noHead` is `?b`, which has no head symbol to index on.
+error: @[cfc_pull] failed: the non-`cfc` side of `cfcPullTest.noHead` is `?b`,
+which has no head symbol to index on.
 -/
 #guard_msgs in
 @[cfc_pull] theorem cfcPullTest.noHead (f : R → R) (a b : A) (h : cfc f a = b) : cfc f a = b := h
@@ -147,7 +214,8 @@ end Attribute
 section BothChange
 
 /--
-error: @[cfc_pull] failed: `cfcPullTest.ringAndUnitality` changes both the scalar ring and the unitality of the functional calculus; such lemmas are not supported.
+error: @[cfc_pull] failed: `cfcPullTest.ringAndUnitality` changes both the scalar ring and the
+unitality of the functional calculus; such lemmas are not supported.
 -/
 #guard_msgs in
 @[cfc_pull]
@@ -162,8 +230,14 @@ end BothChange
 section BoundHoles
 
 /--
-warning: `cfc_sum` applies the functional calculus at `cfc (?f #0)
-  ?a`, which mentions a bound variable. `cfc_pull` cannot recurse under a binder, so it will treat that position as part of the pattern rather than as a hole: the lemma will only apply when the position is already an application of the calculus.
+warning: `cfc_sum` applies the functional calculus at
+  cfc (?f #0) ?a
+which mentions a bound variable. `cfc_pull` cannot recurse under a binder, so it will
+treat that position as part of the pattern rather than as a hole: the lemma will only
+apply when the position is already an application of the calculus.
+
+If that is what you intend, silence this warning with
+`set_option cfcPull.warnBoundHoles false in`.
 -/
 #guard_msgs in
 attribute [cfc_pull] cfc_sum
