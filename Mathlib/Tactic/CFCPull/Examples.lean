@@ -66,6 +66,15 @@ example (ha : p a) (b : A) :
     star a * a + b = cfc (fun x : R ↦ star x * x) a + b := by
   conv in star a * a => cfc_pull +discharge R a
 
+/- `cfc_pull` does not go under binders; `conv` does. Pull each summand under the binder first,
+and then let `cfc_sum` collect the result. -/
+example (ha : p a) {ι : Type*} {s : Finset ι} {h : ι → R → R}
+    (hh : ∀ i, ContinuousOn (h i) (spectrum R a)) :
+    ∑ i ∈ s, star (cfc (h i) a) = cfc (∑ i ∈ s, fun x ↦ star (h i x)) a := by
+  conv_lhs => enter [2, i]; cfc_pull +discharge R a
+  cfc_pull +discharge R a
+  exact fun i _ ↦ (hh i).star
+
 end GenericUnital
 
 section GenericNonUnital

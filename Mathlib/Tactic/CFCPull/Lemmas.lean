@@ -87,6 +87,19 @@ what one wants whenever the scalar already lives in the ring the calculus is tak
 given a higher priority so that they are tried before `cfc_smul`. -/
 attribute [cfc_pull 1100] cfc_const_mul cfc_const_mul_id cfcₙ_const_mul cfcₙ_const_mul_id
 
+/- `cfc_sum` and `cfcₙ_sum` apply the calculus *underneath* the `∑` binder, which `cfc_pull`
+cannot recurse into (`Spec.md` §11). They are tagged anyway, because they finish the job once the
+summands are already applications of the calculus — which is exactly what the staged idiom
+
+```lean
+conv_lhs => enter [2, i]; cfc_pull +discharge R a   -- pull each summand, under the binder
+cfc_pull +discharge R a                             -- `cfc_sum` collects them
+```
+
+produces. The `set_option` acknowledges that the tag is deliberately lossy. -/
+set_option cfcPull.warnBoundHoles false in
+attribute [cfc_pull] cfc_sum cfcₙ_sum
+
 /-! ### Changing the scalar ring and the unitality -/
 
 attribute [cfc_pull]

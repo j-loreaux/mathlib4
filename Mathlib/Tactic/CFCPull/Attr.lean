@@ -355,6 +355,14 @@ def exprSize : Expr → Nat
   | .proj _ _ b => 1 + exprSize b
   | _ => 1
 
+/-- Whether to warn when a `@[cfc_pull]` lemma applies the calculus under a binder, in a
+position `cfc_pull` cannot recurse into. Set to `false` when tagging such a lemma on purpose. -/
+register_option cfcPull.warnBoundHoles : Bool := {
+  defValue := true
+  descr := "warn when a `@[cfc_pull]` lemma applies the continuous functional calculus underneath \
+    a binder, in a position that `cfc_pull` cannot recurse into"
+}
+
 /-! ### Classification -/
 
 /-- Instantiate a tagged lemma: returns its metavariables, their binder infos, the two sides of
@@ -418,6 +426,7 @@ where
     let isVar (e : Expr) : MetaM Bool := return e.isMVar
     let (pat, holes, _) ← abstractHoles (isHoleFor c isVar) (mkFreshExprMVar c.A) alg
     for b in boundHoles c alg do
+      unless cfcPull.warnBoundHoles.get (← getOptions) do continue
       logWarning m!"`{declName}` applies the functional calculus at `{b}`, which mentions a bound \
         variable. `cfc_pull` cannot recurse under a binder, so it will treat that position as \
         part of the pattern rather than as a hole: the lemma will only apply when the position \

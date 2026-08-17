@@ -218,7 +218,20 @@ specific position:
 
 ```lean
 example : star a * a + b = cfc (fun x : R ↦ star x * x) a + b := by
-  conv_lhs => cfc_pull R a
+  conv_lhs => cfc_pull +discharge R a
+```
+
+A `conv` block cannot end with unsolved goals — the same restriction that `rw` inside `conv` is
+subject to — so in `conv` mode any surviving side goal is an error. Use `+discharge`, or arrange
+for the hypotheses to be in context so that `assumption` finds them.
+
+Going under a binder is `conv`'s job rather than the tactic's, which makes sums and the like a
+two-step affair:
+
+```lean
+example : ∑ i ∈ s, star (cfc (g i) a) = cfc (∑ i ∈ s, fun x ↦ star (g i x)) a := by
+  conv_lhs => enter [2, i]; cfc_pull +discharge R a
+  cfc_pull +discharge R a
 ```
 
 The lemmas the tactic uses are those tagged `@[cfc_pull]`; `set_option trace.Tactic.cfc_pull
