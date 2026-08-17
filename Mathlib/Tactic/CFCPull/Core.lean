@@ -399,6 +399,38 @@ def applyPullLemma (l : PullLemma) (e : Expr) (want : Mode)
   collectHypotheses l.declName mvars bis mode
   return { mode, fn, rhs := newRhs, proof := total }
 
+/-- Apply a hole-free `Pull` lemma *without* insisting that its element be the one we are pulling
+towards: `e` is rewritten to `cfc F b` for whatever element `b` the lemma matches. The caller
+then re-enters `pull`, which turns the mismatch into a composition.
+
+This is what lets `NormedSpace.exp (I • a)` become `cfc Complex.exp (I • a)` and from there
+`cfc (fun x ↦ Complex.exp (I * x)) a`. Only hole-free lemmas are eligible, because the holes of a
+lemma applied at an unknown element would themselves be applications of the calculus at that
+unknown element. -/
+def applyLooseLemma (l : PullLemma) (e : Expr) (want : Mode) : PullM (Expr × Expr) := do
+  let ctx ← read
+  if l.numHoles != 0 then
+    throwError "`{l.declName}` has holes, so it cannot be applied at an unknown element"
+  let (mvars, bis, lhs, rhs, proof) ← instantiateLemma l.declName l.symm
+  let (cfcSide, algSide) := if l.cfcOnLhs then (lhs, rhs) else (rhs, lhs)
+  let some c := CFCApp.match? cfcSide | throwError "`{l.declName}` is not a pull lemma"
+  unless ← isDefEq c.A ctx.alg do throwError "`{l.declName}`: wrong algebra"
+  if l.ring == .any then
+    unless ← isDefEq c.R want.ring do throwError "`{l.declName}`: wrong scalar ring"
+  let mode : Mode := { ring := ← instantiateMVars c.R, unital := c.unital }
+  unless ← isDefEq c.p (← getPredicate mode) do throwError "`{l.declName}`: wrong predicate"
+  unless ← withReducible <| isDefEq algSide e do
+    throwError "`{l.declName}` does not match `{e}`"
+  synthesizeInstances l.declName mvars bis
+  let cfcSide ← instantiateMVars cfcSide
+  let some cc := CFCApp.match? cfcSide | throwError "internal error: lost the `cfc` side"
+  let newE := CFCApp.withFn cfcSide (← Core.betaReduce cc.f)
+  if newE == e then throwError "`{l.declName}` made no progress"
+  let step ← if l.cfcOnLhs then mkEqSymm proof else pure proof
+  let step ← mkExpectedTypeHint step (← mkEq e newE)
+  collectHypotheses l.declName mvars bis mode
+  return (newE, step)
+
 /-- Apply a `Compose` lemma to `e = cfc g b`, rewriting it to `cfc g' b'` with `b'` a subterm of
 `b`. Unlike a `Pull` lemma, the element is *not* fixed in advance: it is whatever the structured
 element of the lemma matches. -/
@@ -458,6 +490,14 @@ partial def pull (e : Expr) (want : Mode) : PullM Result := withIncDepth do
     trace[Tactic.cfc_pull] "candidates for {e}: {candidates.map (·.declName)}"
     for l in candidates do
       let r ← observing? do convert (← applyPullLemma l e want pull) want
+      if let some r := r then return r
+    -- 3b. tagged pull lemmas applied at some *other* element, followed by a composition
+    for l in candidates do
+      if l.numHoles != 0 then continue
+      let r ← observing? do
+        let (newE, step) ← applyLooseLemma l e want
+        let res ← pull newE want
+        return { res with proof := ← mkEqTrans step res.proof }
       if let some r := r then return r
     throwError "`cfc_pull` got stuck on `{e}`{indentD m!"(head symbol: \
       {e.getAppFn.constName?.getD `_}, target: {want})"}"

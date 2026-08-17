@@ -49,7 +49,14 @@ def autoParamTacticFor (g : MVarId) : MetaM (TSyntax `tactic) := do
   else if type.isAppOf ``Eq then
     `(tactic| cfc_zero_tac)
   else
-    `(tactic| cfc_tac)
+    -- `cfc_predicate` closes the predicate goals for the inner element of a composition, e.g.
+    -- `p (cfc g a)`; the identifiers are built unresolved so that they are looked up in the
+    -- user's environment rather than in this file's.
+    -- note that `cfc_tac` never fails, so it has to come last
+    `(tactic| first
+      | exact $(mkIdent `cfc_predicate) _ _
+      | exact $(mkIdent `cfcₙ_predicate) _ _
+      | cfc_tac)
 
 /-- Try to close the collected side goals: `assumption` always, and the standard auto-param
 tactics when `+discharge` was given. Returns the goals that survive. -/

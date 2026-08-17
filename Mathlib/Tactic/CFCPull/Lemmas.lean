@@ -110,6 +110,7 @@ attribute [cfc_pull 1100] cfcₙ_comp_const_mul
 attribute [cfc_pull]
   CFC.posPart_def CFC.negPart_def
   CFC.sqrt_def CFC.sqrt_eq_cfc CFC.abs_def
+  CFC.sqrt_eq_real_sqrt CFC.rpow_eq_cfc_real
   CFC.nnrpow_def CFC.rpow_def
   CFC.log_def
   CFC.exp_eq_normedSpace_exp
