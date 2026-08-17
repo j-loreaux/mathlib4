@@ -286,6 +286,74 @@ example (ha : IsStarNormal a) (z : ℂ) :
 
 end NonUnitalCStarAlgebra
 
+section MessySideGoals
+
+/-! ## Side goals that `+discharge` cannot close
+
+`+discharge` runs `cfc_tac`, `cfc_cont_tac` and `cfc_zero_tac`, which between them handle
+continuity of everything `fun_prop` knows and the routine predicate goals. Plenty of side goals
+are outside that reach: continuity on a set that has to be located first, or a hypothesis about
+the values a function takes on the spectrum. Those come back to the user, and `cfc_pull` has
+already done the structural half of the work. -/
+
+variable {A : Type*} [CStarAlgebra A] [PartialOrder A] [StarOrderedRing A]
+variable {a : A}
+
+open scoped NNReal
+
+/- `Real.log` is not continuous at `0`, so `cfc_mul` leaves a continuity goal that `fun_prop`
+cannot discharge. It follows from `IsStrictlyPositive a`, but only after unfolding that to
+`IsUnit a` and going through `spectrum.zero_notMem`. Note that the goal appears once, not twice,
+even though `cfc_mul` asks for it on both factors: identical side goals are merged. -/
+example (ha : IsStrictlyPositive a) :
+    CFC.log a * CFC.log a = cfc (fun x : ℝ ↦ Real.log x * Real.log x) a := by
+  cfc_pull +discharge ℝ a
+  exact Real.continuousOn_log.mono fun x hx h ↦ spectrum.zero_notMem ℝ ha.2 (h ▸ hx)
+
+/- The same story one ring down: `(· ^ x)` on `ℝ≥0` is continuous away from `0` when `x < 0`. -/
+example (ha : IsStrictlyPositive a) (x : ℝ) (hx : x < 0) :
+    a ^ x * a ^ x = cfc (fun t : ℝ≥0 ↦ t ^ x * t ^ x) a := by
+  cfc_pull +discharge ℝ≥0 a
+  exact NNReal.continuousOn_rpow_const (.inl (spectrum.zero_notMem ℝ≥0 ha.2))
+
+/- Not every side goal is a continuity goal: `cfc_inv` needs the function to be nonvanishing on
+the spectrum, which here takes a hypothesis about the spectrum's location. -/
+example (ha : IsSelfAdjoint a) (f : ℝ → ℝ) (hf : Continuous f)
+    (hspec : spectrum ℝ a ⊆ Set.Icc (-1) 1) (hf0 : ∀ x ∈ Set.Icc (-1 : ℝ) 1, f x ≠ 0) :
+    Ring.inverse (cfc f a) = cfc (fun x : ℝ ↦ (f x)⁻¹) a := by
+  cfc_pull +discharge ℝ a
+  exact fun x hx ↦ hf0 x (hspec hx)
+
+end MessySideGoals
+
+section RealTheorems
+
+/-! ## `cfc_pull` followed by `cfc_congr`
+
+This is the workflow the tactic exists for. `cfc_pull` reduces an identity between two
+expressions built from the calculus to an identity between the two functions, and `cfc_congr`
+then reduces that to a pointwise statement on the spectrum. Neither of the two functions below is
+the one the user wrote down; that is exactly the point. -/
+
+variable {A : Type*} [CStarAlgebra A] [PartialOrder A] [StarOrderedRing A]
+variable {a : A}
+
+open scoped NNReal
+
+example (ha : 0 ≤ a) : CFC.sqrt a * CFC.sqrt a = a := by
+  cfc_pull +discharge ℝ≥0 a
+  exact cfc_congr fun x _ ↦ NNReal.mul_self_sqrt x
+
+example (ha : IsSelfAdjoint a) : CFC.log (NormedSpace.exp a) = a := by
+  cfc_pull +discharge ℝ a
+  exact cfc_congr fun x _ ↦ Real.log_exp x
+
+example (ha : IsSelfAdjoint a) : a⁺ - a⁻ = a := by
+  cfc_pull +discharge ℝ a
+  exact cfc_congr fun x _ ↦ by simp
+
+end RealTheorems
+
 section InTheWild
 
 /- Goals of this shape have appeared in Mathlib. -/

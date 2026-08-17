@@ -535,7 +535,10 @@ conversions applied.
   form the `conv` workaround already produces, which is a further reason not to hurry.
 
 * **Relations other than binary ones**, and `cfc_pull ... at h`.
-* **File placement.** `Examples.lean` lives under `Mathlib/` but imports all of Mathlib, so it is
-  deliberately not registered in `Mathlib.lean` (the four tactic files are). Before a pull
-  request it should move to `MathlibTest/CFCPull.lean`, and the `@[cfc_pull]` tags should move
-  from `Mathlib/Tactic/CFCPull/Lemmas.lean` to the declaration sites.
+* **Lemma placement.** The `@[cfc_pull]` tags should move from
+  `Mathlib/Tactic/CFCPull/Lemmas.lean` to the declaration sites, along with the three `rfl`
+  lemmas that file adds.
+* **Side goals in `conv` mode.** `conv` cannot carry unsolved goals out of a block, so anything
+  `+discharge` fails to close is an error there. Some `conv` tactics (`equals`) let the user
+  prove the obligation inline; whether something similar makes sense for `cfc_pull` has not been
+  investigated.

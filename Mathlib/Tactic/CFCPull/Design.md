@@ -12,6 +12,10 @@ Mathlib/Tactic/CFCPull/Core.lean       -- PullM, the recursion (pure MetaM)
 Mathlib/Tactic/CFCPull/Frontend.lean   -- syntax, tactic and conv elaborators
 Mathlib/Tactic/CFCPull/Lemmas.lean     -- `attribute [cfc_pull] ...` for the Mathlib lemma set
 Mathlib/Tactic/CFCPull.lean            -- imports the above
+
+MathlibTest/CFCPull/Examples.lean      -- the main test suite
+MathlibTest/CFCPull/Failures.lean      -- every failure mode, pinned with `#guard_msgs`
+MathlibTest/CFCPull/Tracing.lean       -- what `trace.Tactic.cfc_pull` prints
 ```
 
 `Attr.lean` depends only on `Mathlib.Init` and `Lean.Meta`, so that in a final PR the
@@ -276,8 +280,8 @@ expected.
 6. **Frontend polish** — inference of `R`/`a`, conv mode, `+discharge`, tracing.
 7. **Lemma tagging** — work through `Spec.md` §9 and `Examples.lean`, fixing what breaks.
 
-Each milestone is a commit; `Examples.lean` is the running test suite and is kept compiling
-throughout.
+Each milestone is a commit; `MathlibTest/CFCPull/Examples.lean` is the running test suite and is
+kept compiling throughout.
 
 ## 6. Status
 
@@ -295,8 +299,6 @@ Two refinements were added on top of the plan once the examples were running:
 
 Remaining loose ends, in rough priority order:
 
-1. `Examples.lean` imports all of Mathlib, so it is not registered in `Mathlib.lean` (the four
-   tactic files are). It should become `MathlibTest/CFCPull.lean`.
-2. The `@[cfc_pull]` tags in `Lemmas.lean` should move to the declaration sites, and the three
+1. The `@[cfc_pull]` tags in `Lemmas.lean` should move to the declaration sites, and the three
    `rfl` lemmas it adds (`CFC.sqrt_def`, `CFC.abs_def`, `CFC.log_def`) to their natural homes.
-3. The scalar-ring choice is greedy (see `Spec.md` §11).
+2. The scalar-ring choice is greedy (see `Spec.md` §11).
