@@ -24,6 +24,7 @@ namespace Mathlib.Tactic.CFCPull
 
 open Lean Meta Elab Tactic
 
+/-- Elaborate the configuration of `cfc_pull`. -/
 declare_config_elab elabCFCPullConfig Config
 
 /-! ### Side goals -/
@@ -169,14 +170,23 @@ the goal. `preferUnital` reports whether the calculus found in the goal (if any)
 that `cfc_pull` on a goal mentioning `cfcₙ` defaults to the non-unital calculus. -/
 def elabRingAndElem (target : Expr) (ring? elem? : Option Term) :
     TacticM (Expr × Expr × Option Bool) := do
+  /- The first explicit argument is the scalar ring.  Elaborating the element there is a natural
+  mistake, so it gets a message of its own. -/
+  let elabRing (r : Term) : TacticM Expr := do
+    try
+      Term.elabType r
+    catch ex =>
+      throwError "`cfc_pull`'s first argument is the scalar ring, but `{r}` did not elaborate \
+        as a type:{indentD ex.toMessageData}\nIf `{r}` is the element to pull towards, give the \
+        scalar ring as well, as in `cfc_pull ℝ {r}`."
   match ring?, elem? with
   | some r, some a =>
-    let R ← Term.elabType r
+    let R ← elabRing r
     let elem ← Term.elabTerm a none
     Term.synthesizeSyntheticMVarsNoPostponing
     return (← instantiateMVars R, ← instantiateMVars elem, none)
   | some r, none =>
-    let R ← Term.elabType r
+    let R ← elabRing r
     Term.synthesizeSyntheticMVarsNoPostponing
     let c ← inferCFCApp target
     return (← instantiateMVars R, c.a, some c.unital)
@@ -257,6 +267,7 @@ def mkConfig (cfgStx : Syntax) (goalUnital : Option Bool) : TacticM Config := do
       cfg := { cfg with unital := u }
   return cfg
 
+/-- Elaborator for the `cfc_pull` tactic. -/
 @[tactic cfcPull]
 def evalCFCPull : Tactic := fun stx => withMainContext do
   let goal ← getMainGoal
@@ -266,6 +277,7 @@ def evalCFCPull : Tactic := fun stx => withMainContext do
   let cfg ← mkConfig stx[1] goalUnital
   cfcPullTarget cfg R elem goal
 
+/-- Elaborator for `cfc_pull` in `conv` mode. -/
 @[tactic cfcPullConv]
 def evalCFCPullConv : Tactic := fun stx => withMainContext do
   let lhs ← Conv.getLhs

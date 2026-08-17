@@ -1,12 +1,21 @@
+/-
+Copyright (c) 2026 Jireh Loreaux. All rights reserved.
+Released under Apache 2.0 license as described in the file LICENSE.
+Authors: Jireh Loreaux
+-/
 module
 
-public import Mathlib
 public import Mathlib.Tactic.CFCPull
+public import Mathlib.Analysis.CStarAlgebra.Classes
+public import Mathlib.Analysis.CStarAlgebra.ContinuousFunctionalCalculus.Isometric
+public import Mathlib.Analysis.CStarAlgebra.ContinuousFunctionalCalculus.Order
+public import Mathlib.Analysis.SpecialFunctions.Pow.Continuity
+public import Mathlib.Tactic.Linarith
 
 /-!
 # Examples for the `cfc_pull` tactic
 
-This is the working test suite for `cfc_pull`. Each example states an identity between an
+This is the main test suite for `cfc_pull`. Each example states an identity between an
 expression in a C⋆-algebra (or in any algebra with a continuous functional calculus) and the same
 expression with `cfc`/`cfcₙ` pulled to the head, and proves it with `cfc_pull`.
 

@@ -111,6 +111,14 @@ instance : ExceptToTraceResult Exception Result where
 
 /-! ### Small utilities -/
 
+/-- Exception used by the recursion-depth guard.
+
+The guard has to be able to abort the whole run: thrown as an ordinary error it would be caught
+by `observing?` like any other candidate failure, and the user would be told that `cfc_pull` got
+stuck rather than that it ran out of depth. `runPull` turns it back into a readable message. -/
+initialize maxDepthExceptionId : InternalExceptionId ←
+  registerInternalExceptionId `Mathlib.Tactic.CFCPull.maxDepth
+
 /-- Run `x`, undoing its metavariable assignments and its side goals if it fails.
 
 Only the metavariable context and the `PullM` state are rolled back, not the whole `MetaM` state:
@@ -121,17 +129,18 @@ def observing? {α : Type} (x : PullM α) : PullM (Option α) := do
   try
     return some (← x)
   catch ex =>
+    if let .internal id _ := ex then
+      if id == maxDepthExceptionId then throw ex
     setMCtx mctx
     set s
-    trace[Tactic.cfc_pull] "✗ {ex.toMessageData}"
+    trace[Tactic.cfc_pull] "{crossEmoji} {ex.toMessageData}"
     return none
 
 /-- Increase the recursion depth, failing if the configured maximum is reached. -/
 def withIncDepth {α : Type} (x : PullM α) : PullM α := do
   let ctx ← read
   if ctx.depth ≥ ctx.cfg.maxDepth then
-    throwError "`cfc_pull` reached the maximum recursion depth of {ctx.cfg.maxDepth}; either the \
-      expression is too deeply nested, or the `@[cfc_pull]` lemma set is looping"
+    throw (.internal maxDepthExceptionId)
   withReader (fun c => { c with depth := c.depth + 1 }) x
 
 /-- Strip an `autoParam` wrapper, so that a deferred goal displays as the user expects. -/
@@ -588,7 +597,16 @@ def runPull (cfg : Config) (R elem e : Expr) : MetaM (Expr × Expr × Array MVar
   let ctx : Context := { cfg, elem, alg, target, lemmas }
   -- Compute the predicate up front, so that "there is no such functional calculus" is reported
   -- as itself rather than as a pile of failed lemma applications.
-  let (res, st) ← ((do let _ ← getPredicate target; pull e target).run ctx).run {}
+  let (res, st) ←
+    try
+      ((do let _ ← getPredicate target; pull e target).run ctx).run {}
+    catch ex =>
+      if let .internal id _ := ex then
+        if id == maxDepthExceptionId then
+          throwError "`cfc_pull` reached its maximum recursion depth of {cfg.maxDepth}; either \
+            the expression is more deeply nested than that, or the `@[cfc_pull]` lemma set is \
+            looping. Raise the limit with `cfc_pull (maxDepth := {2 * cfg.maxDepth}) ..`"
+      throw ex
   let goals ← st.sideGoals.filterM fun g => return !(← g.isAssigned)
   return (← instantiateMVars res.rhs, ← instantiateMVars res.proof, goals)
 
