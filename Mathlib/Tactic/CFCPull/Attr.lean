@@ -433,7 +433,8 @@ elab "#cfc_pull_lemmas" : command => Elab.Command.liftTermElabM do
   let l ← getLemmas
   let nm (n : Name) (symm : Bool) : MessageData := if symm then m!"{n} ←" else m!"{n}"
   let sec (header : String) (xs : Array MessageData) : MessageData :=
-    m!"{header}:" ++ MessageData.nestD (MessageData.joinSep xs.toList m!"\n")
+    if xs.isEmpty then m!"{header}: (none)"
+    else m!"{header}:{indentD (MessageData.joinSep xs.toList m!"\n")}"
   logInfo <| MessageData.joinSep [
     sec "identity lemmas" <| l.id.map fun e =>
       m!"{nm e.declName e.symm} : ring := {e.ring}, unital := {e.unital}",
