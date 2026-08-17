@@ -290,29 +290,37 @@ def scalarPath (src tgt : RingKey) (unital : Bool) : PullM (Option (Array Scalar
 
 /-! ### Applying tagged lemmas -/
 
-/-- Apply a transition lemma, i.e. an equation `cfc f a = cfc' g a` between two applications of
-the calculus to the *same* element. Used for both the `Scalar` and the `Unital` categories.
+/-- Rewrite `e` with a tagged equation between two applications of the calculus, by matching one
+side against `e` and returning the other, instantiated.
 
-`srcOnLhs` says which side of the equation should be matched against `res.rhs`. -/
-def applyTransition (declName : Name) (symm srcOnLhs : Bool) (res : Result) : PullM Result := do
+This single routine covers the `Scalar`, `Unital` and `Compose` categories: they differ only in
+which of the ring, the unitality and the element the two sides disagree about, and none of that
+matters here — matching against `e` determines everything. `mode` is the mode of `e`, which is
+used to fill the predicate hypotheses of the lemma. -/
+def rewriteWithCFCLemma (declName : Name) (symm srcOnLhs : Bool) (e : Expr) (mode : Mode) :
+    PullM (Expr × Expr) := do
   let ctx ← read
   let (mvars, bis, lhs, rhs, proof) ← instantiateLemma declName symm
   let (srcSide, tgtSide) := if srcOnLhs then (lhs, rhs) else (rhs, lhs)
-  let some cs := CFCApp.match? srcSide | throwError "`{declName}` is not a transition lemma"
+  let some cs := CFCApp.match? srcSide | throwError "`{declName}` is not a `cfc`-to-`cfc` lemma"
   unless ← isDefEq cs.A ctx.alg do throwError "`{declName}`: wrong algebra"
-  unless ← isDefEq cs.R res.mode.ring do throwError "`{declName}`: wrong scalar ring"
-  unless ← isDefEq cs.p (← getPredicate res.mode) do throwError "`{declName}`: wrong predicate"
-  unless ← isDefEq cs.a ctx.elem do throwError "`{declName}`: wrong element"
-  unless ← isDefEq cs.f res.fn do throwError "`{declName}`: could not match the function"
+  unless ← isDefEq cs.p (← getPredicate mode) do throwError "`{declName}`: wrong predicate"
+  unless ← withReducible <| isDefEq srcSide e do
+    throwError "`{declName}` does not match `{e}`"
   synthesizeInstances declName mvars bis
   let tgtSide ← instantiateMVars tgtSide
-  let some ct := CFCApp.match? tgtSide | throwError "`{declName}` is not a transition lemma"
-  let fn ← Core.betaReduce ct.f
-  let newRhs := CFCApp.withFn tgtSide fn
+  let some ct := CFCApp.match? tgtSide | throwError "`{declName}` is not a `cfc`-to-`cfc` lemma"
+  let newE := CFCApp.withFn tgtSide (← Core.betaReduce ct.f)
   let step ← if srcOnLhs then pure proof else mkEqSymm proof
-  let step ← mkExpectedTypeHint step (← mkEq res.rhs newRhs)
-  collectHypotheses declName mvars bis res.mode
-  return { mode := { ring := ct.R, unital := ct.unital }, fn, rhs := newRhs,
+  let step ← mkExpectedTypeHint step (← mkEq e newE)
+  collectHypotheses declName mvars bis mode
+  return (newE, step)
+
+/-- Apply a transition lemma (a `Scalar` or `Unital` lemma) to a result. -/
+def applyTransition (declName : Name) (symm srcOnLhs : Bool) (res : Result) : PullM Result := do
+  let (newE, step) ← rewriteWithCFCLemma declName symm srcOnLhs res.rhs res.mode
+  let some c := CFCApp.match? newE | throwError "`{declName}`: the result is not a `cfc`"
+  return { mode := { ring := c.R, unital := c.unital }, fn := c.f, rhs := newE,
            proof := ← mkEqTrans res.proof step }
 
 /-- Convert a result to the requested mode: first the unitality, then the scalar ring.
@@ -431,29 +439,6 @@ def applyLooseLemma (l : PullLemma) (e : Expr) (want : Mode) : PullM (Expr × Ex
   collectHypotheses l.declName mvars bis mode
   return (newE, step)
 
-/-- Apply a `Compose` lemma to `e = cfc g b`, rewriting it to `cfc g' b'` with `b'` a subterm of
-`b`. Unlike a `Pull` lemma, the element is *not* fixed in advance: it is whatever the structured
-element of the lemma matches. -/
-def applyComposeLemma (l : ComposeLemma) (e : Expr) (mode : Mode) : PullM (Expr × Expr) := do
-  let ctx ← read
-  let (mvars, bis, lhs, rhs, proof) ← instantiateLemma l.declName l.symm
-  let (srcSide, tgtSide) := if l.srcOnLhs then (lhs, rhs) else (rhs, lhs)
-  let some cs := CFCApp.match? srcSide | throwError "`{l.declName}` is not a composition lemma"
-  unless ← isDefEq cs.A ctx.alg do throwError "`{l.declName}`: wrong algebra"
-  if l.ring == .any then
-    unless ← isDefEq cs.R mode.ring do throwError "`{l.declName}`: wrong scalar ring"
-  unless ← isDefEq cs.p (← getPredicate mode) do throwError "`{l.declName}`: wrong predicate"
-  unless ← withReducible <| isDefEq srcSide e do
-    throwError "`{l.declName}` does not match `{e}`"
-  synthesizeInstances l.declName mvars bis
-  let tgtSide ← instantiateMVars tgtSide
-  let some ct := CFCApp.match? tgtSide | throwError "`{l.declName}` is not a composition lemma"
-  let newE := CFCApp.withFn tgtSide (← Core.betaReduce ct.f)
-  let step ← if l.srcOnLhs then pure proof else mkEqSymm proof
-  let step ← mkExpectedTypeHint step (← mkEq e newE)
-  collectHypotheses l.declName mvars bis mode
-  return (newE, step)
-
 /-- Convert an `IdLemma` into the `PullLemma` that `applyPullLemma` expects; an identity lemma is
 just a pull lemma whose algebraic side is the element and which therefore has no holes. -/
 def IdLemma.toPullLemma (l : IdLemma) : PullLemma where
@@ -509,19 +494,31 @@ partial def pullExisting (e : Expr) (c : CFCApp) (want : Mode) : PullM Result :=
   let mode : Mode := { ring := c.R, unital := c.unital }
   if ← withReducible <| isDefEq c.a ctx.elem then
     return { mode, fn := c.f, rhs := e, proof := ← mkEqRefl e }
-  -- A composition.  First look for a tagged lemma matching the head of the inner element.
+  -- The calculus is applied to something else, so this is a composition.  Fix the unitality
+  -- first: composing inside the non-unital calculus when the unital one was asked for would put
+  -- a spurious `f 0 = 0` side goal on every piece of the inner expression.
+  if c.unital != want.unital then
+    for l in ctx.lemmas.unital do
+      unless ← l.ring.matchesRing c.R do continue
+      let srcOnLhs := if want.unital then l.nonUnitalOnLhs else !l.nonUnitalOnLhs
+      let r ← observing? do
+        let (newE, step) ← rewriteWithCFCLemma l.declName l.symm srcOnLhs e mode
+        let res ← pull newE want
+        return { res with proof := ← mkEqTrans step res.proof }
+      if let some r := r then return r
+  -- Look for a tagged composition lemma matching the head of the inner element.
   let innerHead := c.a.getAppFn.constName?
   for l in ctx.lemmas.compose do
     unless l.unital == c.unital do continue
     unless ← l.ring.matchesRing c.R do continue
     unless some l.innerHead == innerHead do continue
     let r ← observing? do
-      let (newE, step) ← applyComposeLemma l e mode
+      let (newE, step) ← rewriteWithCFCLemma l.declName l.symm l.srcOnLhs e mode
       let res ← pull newE want
       return { res with proof := ← mkEqTrans step res.proof }
     if let some r := r then return r
-  -- Otherwise, pull the inner element first and try again; this is what makes `cfc_comp'`
-  -- applicable.
+  -- Otherwise, pull the inner element first and try again; that turns `cfc g b` into
+  -- `cfc g (cfc h a)`, which the composition lemma for `cfc` (namely `cfc_comp'`) handles.
   let inner ← pull c.a mode
   if inner.rhs == c.a then
     throwError "`cfc_pull` made no progress on the inner element `{c.a}`"
