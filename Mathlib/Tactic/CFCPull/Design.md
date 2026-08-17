@@ -107,13 +107,32 @@ structure Result where
   proof  : Expr            -- `e = cfc[ₙ] f a`
 ```
 
-The three entry points are
+The entry points are
 
 ```lean
-partial def pull      (e : Expr) (want : Expr × Bool) : PullM Result   -- guaranteed at `want`
-partial def pullRaw   (e : Expr) : PullM Result                        -- at whatever mode it lands
-def convert (r : Result) (want : Expr × Bool) : PullM Result
+partial def pull           (e : Expr) (want : Mode) : PullM Result   -- guaranteed at `want`
+partial def pullExisting   (e : Expr) (c : CFCApp) (want : Mode) : PullM Result
+partial def pullCandidates (e : Expr) (want : Mode) : PullM (Array PullLemma)
+def convert (r : Result) (want : Mode) : PullM Result
+def runPull (cfg : Config) (R elem e : Expr) : MetaM (Expr × Expr × Array MVarId)
 ```
+
+and the workers that apply a single tagged lemma:
+
+```lean
+def applyPullLemma      (l : PullLemma) (e : Expr) (want : Mode)
+                        (rec : Expr → Mode → PullM Result) : PullM Result
+def applyLooseLemma     (l : PullLemma) (e : Expr) (want : Mode) : PullM (Expr × Expr)
+def rewriteWithCFCLemma (declName : Name) (symm srcOnLhs : Bool) (e : Expr) (mode : Mode) :
+                          PullM (Expr × Expr)
+def applyTransition     (declName : Name) (symm srcOnLhs : Bool) (res : Result) : PullM Result
+```
+
+`rewriteWithCFCLemma` turned out to cover the `Scalar`, `Unital` *and* `Compose` categories at
+once: all three are equations between two applications of the calculus, and matching one side
+against `e` determines the ring, the predicate, the function and the element in one go. The
+three categories differ only in which of those the two sides disagree about, which the caller
+already knows and the routine does not need to.
 
 ### Applying a `Pull` lemma — the central routine
 
@@ -216,6 +235,27 @@ Tactic mode:
 
 Conv mode: `Conv.getLhs`, run `pull`, `Conv.updateLhs newLhs proof`, then append the side goals.
 
+## 4a. Two things the first design got wrong
+
+Both were found by running the examples, and both are worth remembering.
+
+**Instances are not a problem.** The worry was that matching a lemma's algebraic side at
+reducible transparency would fail on the instance arguments, since e.g. `cfc_mul`'s pattern
+carries `Distrib.toMul (instDistribOfSemiring (Ring.toSemiring ?instRing))` — a projection chain
+stuck on a metavariable — where the goal carries a concrete chain through `CStarAlgebra`. In
+fact `isDefEq` resolves this without help (it synthesises instance metavariables when it gets
+stuck on them), so no instances need to be synthesised before matching, at reducible
+transparency or otherwise. Instances are synthesised *after* the match, which is also what makes
+"this lemma does not apply over `ℝ≥0`" fall out for free.
+
+**`mkAppM` cannot build a class application.** `mkAppM ``ContinuousFunctionalCalculus #[R, A, ?p]`
+silently returns a three-argument application, because `mkAppM` stops at the last explicit
+argument and this class's instance arguments come after it. `synthInstance` then fails on the
+malformed type and the tactic concludes there is no functional calculus. `mkClassApp` in
+`Core.lean` does the job properly, by `forallMetaTelescope`-ing the class and synthesising every
+instance argument; with a well-formed type, `synthInstance` resolves the `outParam` `?p` as
+expected.
+
 ## 5. Milestones
 
 1. **`Attr.lean`** — data structures, classification, extensions, attribute. Test by tagging a
@@ -231,4 +271,26 @@ Conv mode: `Conv.getLhs`, run `pull`, `Conv.updateLhs newLhs proof`, then append
 7. **Lemma tagging** — work through `Spec.md` §9 and `Examples.lean`, fixing what breaks.
 
 Each milestone is a commit; `Examples.lean` is the running test suite and is kept compiling
-throughout (examples not yet supported stay behind `sorry`).
+throughout.
+
+## 6. Status
+
+All of the above is implemented, and every example in `Examples.lean` compiles with no `sorry`.
+Two refinements were added on top of the plan once the examples were running:
+
+* **Step 3b of the algorithm** (`applyLooseLemma`): a hole-free pull lemma may be applied at an
+  element other than the one being pulled towards, after which the algorithm re-enters and
+  handles the mismatch as a composition. Without it `NormedSpace.exp (I • a)` is stuck, because
+  `CFC.complex_exp_eq_normedSpace_exp` only ever matches `NormedSpace.exp a` itself.
+* **Unitality before composition** (in `pullExisting`): when the outer calculus is `cfcₙ` and the
+  unital one was requested, `cfcₙ_eq_cfc` is applied to the whole expression before descending
+  into the inner element. Otherwise the inner expression is pulled in the non-unital calculus and
+  every constant in it acquires an unprovable `f 0 = 0` side goal.
+
+Remaining loose ends, in rough priority order:
+
+1. `Examples.lean` imports all of Mathlib, so it is not registered in `Mathlib.lean` (the four
+   tactic files are). It should become `MathlibTest/CFCPull.lean`.
+2. The `@[cfc_pull]` tags in `Lemmas.lean` should move to the declaration sites, and the three
+   `rfl` lemmas it adds (`CFC.sqrt_def`, `CFC.abs_def`, `CFC.log_def`) to their natural homes.
+3. The scalar-ring choice is greedy (see `Spec.md` §11).

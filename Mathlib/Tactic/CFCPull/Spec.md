@@ -167,6 +167,10 @@ Write `E` for the `cfc`/`cfcₙ` **element** argument and `F` for its **function
 | `Unital`  | `cfcₙ F a = cfc F a` | both sides are cfc-applications, same ring, **different** unitality |
 | `Compose` | `cfc (fun x ↦ F (G x)) a = cfc F ⟨expression in a⟩` | both sides are cfc-applications, same ring and unitality, **different** elements |
 
+For `Compose`, the side to rewrite *from* is the one whose element is the larger expression
+(measured by node count); this is more robust than requiring the other side's element to be a bare
+variable, which fails for lemmas like `cfc_comp_inv : cfc (fun x ↦ f x⁻¹) ↑a = cfc f ↑a⁻¹`.
+
 Stored data per category:
 
 * **`Id`** — the ring key and unitality. Indexed by `(ringKey, unital)`.
@@ -188,8 +192,8 @@ Stored data per category:
 * **`Unital`** — the ring key and which side is non-unital. Stored as a list; usable in both
   directions (right-to-left needs no extra hypotheses beyond those of the lemma).
 * **`Compose`** — the ring key, the unitality, and the head symbol of the *structured* element,
-  i.e. of the element argument on whichever side is not a bare variable. For `cfc_comp'` the
-  head symbol is `cfc` itself; for `cfc_comp_pow` it is `HPow.hPow`. Indexed by head symbol.
+  i.e. of the element argument on the source side. For `cfc_comp'` the head symbol is `cfc`
+  itself; for `cfc_comp_pow` it is `HPow.hPow`. Indexed by head symbol.
 
 Tagging a lemma that does not fit any category is an error, and the error message says why.
 
@@ -216,14 +220,19 @@ backtracking (the `MetaM` state is checkpointed around every candidate).
 
 2. **Existing calculus.** If `e` is `cfc g b` or `cfcₙ g b` — say at mode `m'` — then:
    * if `b` is defeq to `a`: the result is `(g, rfl)` at mode `m'`; go to step 5.
-   * otherwise this is a **composition**. Let `h` be the head symbol of `b`.
-     * If a `Compose` lemma for `(m', h)` matches, apply it. This rewrites `cfc g b` to
-       `cfc g' b'` with `b'` a proper subterm of `b`, and the algorithm recurses on the result.
-       (E.g. `cfc f (a ^ n)` ⇝ `cfc (fun x ↦ f (x ^ n)) a` via `cfc_comp_pow`.)
+   * otherwise this is a **composition**, handled in three stages.
+     * First, if `m'` and `mode` disagree about unitality, apply the `Unital` lemma to `e`
+       *before* descending into `b`. Composing in the non-unital calculus when the unital one was
+       requested would put a spurious `f 0 = 0` side goal on every piece of `b` — this is the
+       difference between `cfcₙ Real.sqrt (1 - a ^ 2)` generating the unprovable goal
+       `(1 : ℝ) = 0` and generating nothing at all.
+     * Then, if a `Compose` lemma for `(m', head of b)` matches, apply it. This rewrites
+       `cfc g b` to `cfc g' b'` with `b'` a subterm of `b`, and the algorithm recurses on the
+       result. (E.g. `cfc f (a ^ n)` ⇝ `cfc (fun x ↦ f (x ^ n)) a` via `cfc_comp_pow`.)
      * Otherwise, recurse on `b` at mode `m'`, obtaining `b = cfc h a`, use `congrArg` to get
-       `cfc g b = cfc g (cfc h a)`, and finish with the `Compose` lemma whose head symbol is
-       `cfc` (i.e. `cfc_comp'`). This requires a `UniqueHom` instance; if it is missing, the
-       tactic reports that specifically.
+       `cfc g b = cfc g (cfc h a)`, and re-enter the algorithm, which now finds the `Compose`
+       lemma whose head symbol is `cfc` (i.e. `cfc_comp'`). This requires a `UniqueHom`
+       instance.
 
 3. **Tagged pull lemmas.** Look up the head of `e` in the `Pull` index and try the candidates in
    order of preference:
@@ -252,10 +261,19 @@ backtracking (the `MetaM` state is checkpointed around every candidate).
       `e = ⟨algebra side⟩` by congruence, then the lemma itself, then β-reduce the resulting
       function.
 
-4. **Failure.** If no candidate applies, `pull` fails for `e`. The trace records every candidate
+4. **Tagged pull lemmas at a different element.** If nothing above worked, try the *hole-free*
+   candidates again without fixing the element: `e` is rewritten to `cfc F b` for whatever
+   element `b` the lemma matches, and the algorithm re-enters at step 2, which turns the
+   mismatch into a composition. This is what makes `NormedSpace.exp (I • a)` work: it becomes
+   `cfc Complex.exp (I • a)` and then, via `cfc_comp_smul`, `cfc (fun x ↦ Complex.exp (I * x)) a`.
+
+   Only hole-free lemmas are eligible, since the holes of a lemma applied at an unknown element
+   would themselves be applications of the calculus at that unknown element.
+
+5. **Failure.** If no candidate applies, `pull` fails for `e`. The trace records every candidate
    considered and why it was rejected.
 
-5. **Conversion.** Steps 1–3 may produce a result at a mode `m'` different from the requested
+6. **Conversion.** Steps 1–4 may produce a result at a mode `m'` different from the requested
    `mode`. It is converted in two stages, unitality first, then the scalar ring:
    * `cfcₙ f a = cfc f a` (`Unital` category) — used left-to-right to make a non-unital result
      unital, right-to-left in the other direction. Doing this first keeps the `f 0 = 0` side
@@ -268,9 +286,9 @@ backtracking (the `MetaM` state is checkpointed around every candidate).
 ### 6.3 Termination
 
 The recursion is structural in `e` except for step 2, where `Compose` lemmas replace `b` by a
-proper subterm, and step 5, which is not recursive. A `maxDepth` guard (default 48) is
-nevertheless enforced, so that a badly-tagged lemma set degrades into an error rather than a
-hang.
+subterm, step 4, which replaces `e` by a `cfc` application at a subterm of `e`, and step 6, which
+is not recursive. A `maxDepth` guard (default 48) is nevertheless enforced, so that a
+badly-tagged lemma set degrades into an error rather than a hang.
 
 ## 7. Side goals
 
@@ -284,8 +302,10 @@ goal. The tactic handles them as follows.
   wrappers stripped so the goal displays cleanly.
 * Once the whole pull is finished (so that no function metavariables remain), the frontend
   tries `assumption` on each collected goal, and, if `+discharge` was given, the appropriate
-  auto-param tactic (`cfc_cont_tac` for `ContinuousOn`, `cfc_zero_tac` for `_ 0 = 0`, `cfc_tac`
-  otherwise).
+  auto-param tactic (`cfc_cont_tac` for `ContinuousOn`, `cfc_zero_tac` for an equation,
+  `cfc_predicate`/`cfcₙ_predicate` followed by `cfc_tac` otherwise — the predicate lemmas come
+  first because `cfc_tac` never fails, and they are what closes goals like `p (cfc g a)` coming
+  from the inner element of a composition).
 * Surviving goals are returned to the user, after the main goal, in the order they were created.
 
 Grouping the goals into conjunctions or giving them user-visible case names is left to a later
@@ -390,27 +410,38 @@ and is exactly the situation `cfc_pull` is designed for: the user finishes with 
 
 ## 9. Lemmas to tag
 
-Below, "generic" means ring key `any`.
+This is the set tagged in `Mathlib/Tactic/CFCPull/Lemmas.lean`; `#cfc_pull_lemmas` prints it.
+"Generic" means ring key `any`.
 
 **`Id`**: `cfc_id'`, `cfcₙ_id'`.
 
-**`Pull`, generic, unital**: `cfc_mul`, `cfc_add`, `cfc_sub`, `cfc_neg`, `cfc_pow`, `cfc_smul`,
-`cfc_const_mul`, `cfc_star`, `cfc_const`, `cfc_const_one`, `cfc_const_zero`, `cfc_inv`,
-`cfc_map_div`, `cfc_map_polynomial`; and the more specific, side-goal-cheaper variants
-`cfc_pow_id`, `cfc_smul_id`, `cfc_const_mul_id`, `cfc_star_id`, `cfc_neg_id`.
+**`Pull`, generic, unital**: `cfc_add`, `cfc_sub`, `cfc_neg`, `cfc_mul`, `cfc_pow`, `cfc_smul`,
+`cfc_star`, `cfc_const`, `cfc_const_one`, `cfc_const_zero`, `cfc_const_add`, `cfc_add_const`,
+`cfc_inv`, `cfc_inv_id`, `cfc_zpow`, `cfc_ringInverse_id`, `cfc_map_div`; the hole-free
+specialisations `cfc_neg_id`, `cfc_pow_id`, `cfc_smul_id`, `cfc_star_id`; and, at priority 1100,
+`cfc_const_mul` and `cfc_const_mul_id` (preferred over `cfc_smul` so that a scalar already living
+in the target ring produces `r * f x` rather than `r • f x`).
 
-**`Pull`, generic, non-unital**: `cfcₙ_mul`, `cfcₙ_add`, `cfcₙ_sub`, `cfcₙ_neg`, `cfcₙ_pow`,
-`cfcₙ_smul`, `cfcₙ_const_mul`, `cfcₙ_star`, `cfcₙ_const_zero`; and `cfcₙ_pow_id`,
-`cfcₙ_smul_id`, `cfcₙ_star_id`, `cfcₙ_neg_id`.
+**`Pull`, generic, non-unital**: `cfcₙ_add`, `cfcₙ_sub`, `cfcₙ_neg`, `cfcₙ_mul`, `cfcₙ_smul`,
+`cfcₙ_star`, `cfcₙ_const_zero`, `cfcₙ_neg_id`, `cfcₙ_smul_id`, `cfcₙ_star_id`, and at priority
+1100 `cfcₙ_const_mul`, `cfcₙ_const_mul_id`.
 
 **`Pull`, concrete ring**: `CFC.posPart_def`, `CFC.negPart_def` (`ℝ`, non-unital);
-`CFC.sqrt_def` (`ℝ≥0`, non-unital); `CFC.abs_def` (`ℝ≥0`, non-unital, element `star a * a`);
-`CFC.nnrpow_def` (`ℝ≥0`, non-unital); `CFC.rpow_def` (`ℝ≥0`, unital); `CFC.log_def`
-(`ℝ`, unital); `CFC.exp_eq_normedSpace_exp` (generic — it is stated for `RCLike 𝕜`),
-`CFC.real_exp_eq_normedSpace_exp`, `CFC.complex_exp_eq_normedSpace_exp`.
+`CFC.sqrt_def` (`ℝ≥0`, non-unital), `CFC.sqrt_eq_cfc` (`ℝ≥0`, unital),
+`CFC.sqrt_eq_real_sqrt` (`ℝ`, non-unital), `CFC.abs_def` (`ℝ≥0`, non-unital, at the element
+`star a * a`); `CFC.nnrpow_def` (`ℝ≥0`, non-unital), `CFC.rpow_def` (`ℝ≥0`, unital),
+`CFC.rpow_eq_cfc_real` (`ℝ`, unital); `CFC.log_def` (`ℝ`, unital);
+`CFC.exp_eq_normedSpace_exp` (generic — it is stated for `RCLike 𝕜`) with
+`CFC.real_exp_eq_normedSpace_exp` and `CFC.complex_exp_eq_normedSpace_exp` at priority 1100 so
+that `Real.exp`/`Complex.exp` are produced in preference to `NormedSpace.exp`.
 
-Some of these `_def` lemmas do not yet exist in Mathlib and are added alongside the tactic
-(`CFC.sqrt_def`, `CFC.abs_def`, `CFC.log_def`); they are all `rfl`.
+Note that when several lemmas describe the same operation at different rings, the candidate
+ordering picks the right one on its own: at target ring `ℝ`, `CFC.sqrt_eq_real_sqrt` costs
+nothing while `CFC.sqrt_def` costs a scalar conversion, and at `ℝ≥0` the `ℝ` lemma is discarded
+because there is no conversion `ℝ → ℝ≥0`.
+
+`CFC.sqrt_def`, `CFC.abs_def` and `CFC.log_def` did not exist in Mathlib and are added (all are
+`rfl`) alongside the tags.
 
 **`Scalar`**: `cfc_nnreal_eq_real`, `cfcₙ_nnreal_eq_real`, `cfc_real_eq_complex`,
 `cfcₙ_real_eq_complex`. The reverse directions (`cfc_real_eq_nnreal`, `cfc_complex_eq_real`)
@@ -418,10 +449,14 @@ carry non-syntactic hypotheses and are deliberately *not* tagged.
 
 **`Unital`**: `cfcₙ_eq_cfc`.
 
-**`Compose`**: `cfc_comp'`, `cfcₙ_comp'` (head symbol `cfc`/`cfcₙ`; these are the fallbacks used
-by step 2), `cfc_comp_pow`, `cfc_comp_smul`, `cfc_comp_const_mul`, `cfc_comp_star`,
-`cfc_comp_neg`, `cfc_comp_polynomial`, `cfcₙ_comp_smul`, `cfcₙ_comp_const_mul`,
-`cfcₙ_comp_star`, `cfcₙ_comp_neg`.
+**`Compose`**: `cfc_comp'`, `cfcₙ_comp'` (head symbol `cfc`/`cfcₙ`; the fallbacks used by step 2),
+`cfc_comp_pow`, `cfc_comp_smul`, `cfc_comp_star`, `cfc_comp_neg`, `cfc_comp_inv`,
+`cfc_comp_zpow`, `cfc_comp_const_mul` (priority 1100), and the non-unital `cfcₙ_comp_smul`,
+`cfcₙ_comp_star`, `cfcₙ_comp_neg`, `cfcₙ_comp_const_mul` (priority 1100).
+
+Not yet tagged, for want of support or of a use case: `cfc_sum` and `cfc_apply_pi` (holes under a
+binder), the polynomial lemmas (`cfc_map_polynomial`, `cfc_comp_polynomial`), and the `Unitization`
+bridges.
 
 ## 10. Errors, tracing and limits
 
@@ -451,3 +486,7 @@ conversions applied.
 * **Lemmas whose holes appear under binders** (`cfc_sum`, `cfc_apply_pi`); these need a
   dependent congruence and are rejected at tagging time for now.
 * **Relations other than binary ones**, and `cfc_pull ... at h`.
+* **File placement.** `Examples.lean` lives under `Mathlib/` but imports all of Mathlib, so it is
+  deliberately not registered in `Mathlib.lean` (the four tactic files are). Before a pull
+  request it should move to `MathlibTest/CFCPull.lean`, and the `@[cfc_pull]` tags should move
+  from `Mathlib/Tactic/CFCPull/Lemmas.lean` to the declaration sites.
