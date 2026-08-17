@@ -1,0 +1,234 @@
+# Implementation plan for `cfc_pull`
+
+Companion to `Spec.md`, which is the normative description of *what* the tactic does. This
+document records *how* it is built: the file layout, the data structures, and the handful of
+metaprogramming techniques that do the real work.
+
+## 1. File layout
+
+```
+Mathlib/Tactic/CFCPull/Attr.lean       -- ring keys, lemma categories, env extensions, @[cfc_pull]
+Mathlib/Tactic/CFCPull/Core.lean       -- PullM, the recursion (pure MetaM)
+Mathlib/Tactic/CFCPull/Frontend.lean   -- syntax, tactic and conv elaborators
+Mathlib/Tactic/CFCPull/Lemmas.lean     -- `attribute [cfc_pull] ...` for the Mathlib lemma set
+Mathlib/Tactic/CFCPull.lean            -- imports the above
+```
+
+`Attr.lean` depends only on `Mathlib.Init` and `Lean.Meta`, so that in a final PR the
+`@[cfc_pull]` tags can migrate to the declaration sites in `Mathlib/Analysis/...`. Until then
+`Lemmas.lean` collects them in one place, which keeps the diff surveyable at the cost of an
+unusual `Tactic → Analysis` import. `Lemmas.lean` is also where the handful of missing `rfl`
+lemmas (`CFC.sqrt_def`, `CFC.abs_def`, `CFC.log_def`) live for now.
+
+## 2. Core data structures (`Attr.lean`)
+
+```lean
+inductive RingKey | const (n : Name) | any
+
+/-- A "mode": which calculus we are producing. The ring and element are `Expr`s at use time;
+`RingKey` is the static approximation stored in the index. -/
+structure Mode where
+  ring   : Expr
+  elem   : Expr
+  unital : Bool
+
+/-- Where the `cfc`/`cfcₙ` application sits and what its arguments are. -/
+structure CFCApp where
+  unital : Bool
+  ring elem fn pred alg : Expr   -- R, a, f, p, A
+```
+
+`CFCApp.match? : Expr → Option CFCApp` recognises `@cfc R A p _ .. _ f a` and
+`@cfcₙ R A p _ .. _ f a` positionally: `R`, `A`, `p` are arguments 0, 1, 2 and `f`, `a` are the
+last two, for both constants (verified: `cfc` takes 15 arguments, `cfcₙ` takes 18).
+
+Lemma records:
+
+```lean
+structure PullLemma where
+  declName : Name; symm : Bool; prio : Nat
+  ring : RingKey; unital : Bool
+  cfcOnLhs : Bool          -- after applying `symm`
+  numHoles : Nat
+
+structure IdLemma    where declName : Name; symm : Bool; ring : RingKey; unital : Bool
+structure ScalarLemma where declName : Name; symm : Bool; src tgt : RingKey; unital : Bool
+structure UnitalLemma where declName : Name; symm : Bool; ring : RingKey; nonUnitalOnLhs : Bool
+structure ComposeLemma where
+  declName : Name; symm : Bool; ring : RingKey; unital : Bool
+  srcOnLhs : Bool          -- which side has the structured element
+  innerHead : Name         -- head symbol of that element
+```
+
+Five environment extensions (`SimpleScopedEnvExtension`, mirroring `Mathlib/Tactic/Push/Attr.lean`):
+a `DiscrTree PullLemma`, and four plain arrays for the other categories (they are small: a
+handful of entries each, and `Id`/`Unital`/`Scalar` are looked up by mode rather than by
+pattern).
+
+### Classification at tagging time
+
+`forallTelescope` the lemma type — this puts the instance hypotheses into the local context as
+local instances, which is what makes `RingKey` detection and later `synthInstance` behave. Then
+`type.eq?`, apply `symm` if `←` was given, and dispatch on `CFCApp.match?` of the two sides
+exactly as the table in `Spec.md` §5 prescribes.
+
+`RingKey` of an expression `R`: `.const n` if `R` is a constant application with head `n` and no
+free variables of the telescope; `.any` otherwise.
+
+Holes of a `Pull` lemma's algebra side: traverse with `Expr.replace`-style logic collecting
+maximal subterms `s` such that `CFCApp.match? s` succeeds with the same ring/unitality/element as
+the cfc side *and* `s`'s function argument is an fvar of the telescope. Reject the lemma if any
+hole contains a loose bound variable (see `Spec.md` §11). The `DiscrTree` key is
+`DiscrTree.mkPath` of the algebra side with holes replaced by fresh metavariables (which become
+wildcard keys).
+
+## 3. The recursion (`Core.lean`)
+
+```lean
+structure Context where
+  cfg      : Config
+  elem     : Expr          -- `a`
+  alg      : Expr          -- `A`
+  ring     : Expr          -- the *target* ring `R`
+  unital   : Bool          -- the *target* unitality
+  depth    : Nat
+
+structure State where
+  sideGoals : Array MVarId
+  /-- cache: mode ↦ (predicate, instance, shared `?ha : p a`) -/
+  predicates : Array (Expr × Bool × Expr × Expr)
+
+abbrev PullM := ReaderT Context (StateRefT State MetaM)
+
+structure Result where
+  ring   : Expr
+  unital : Bool
+  fn     : Expr            -- `f : ring → ring`
+  proof  : Expr            -- `e = cfc[ₙ] f a`
+```
+
+The three entry points are
+
+```lean
+partial def pull      (e : Expr) (want : Expr × Bool) : PullM Result   -- guaranteed at `want`
+partial def pullRaw   (e : Expr) : PullM Result                        -- at whatever mode it lands
+def convert (r : Result) (want : Expr × Bool) : PullM Result
+```
+
+### Applying a `Pull` lemma — the central routine
+
+This is the only genuinely delicate piece. Given the target `e` and a candidate:
+
+1. `forallMetaTelescope` the lemma type; keep the `BinderInfo` array.
+2. Split into cfc side / algebra side according to `cfcOnLhs`.
+3. `isDefEq` the cfc side's `A`, `R`, `p`, element against ours. Order matters: doing the
+   element **before** the pattern match is what pins down lemmas whose algebra side does not
+   mention the element.
+4. For every instance-implicit metavariable still unassigned, `synthInstance` and assign.
+   Rejection here is the mechanism that filters `CommRing`/`RCLike`/`UniqueHom` requirements.
+5. Recompute the holes on the *instantiated* algebra side and build the pattern by substituting
+   a fresh natural metavariable `?xᵢ : A` for each. **Save the pre-unification pattern.**
+6. `withReducible <| isDefEq pattern e`.
+7. Recurse on each `instantiateMVars ?xᵢ` at the lemma's mode.
+8. `isDefEq` each lemma function variable against the recursively produced function.
+9. Discharge/collect the remaining metavariables (§4).
+10. Build the proof (§3.1) and β-reduce.
+
+### 3.1 Building the congruence proof
+
+After step 8 we have, for each hole, `pᵢ : xᵢ = cfc fᵢ a`, and we need
+`e = ⟨algebra side⟩`. The trick is to abstract the holes into a genuine function:
+
+```lean
+withLocalDeclsD (holes.map fun _ => (`x, fun _ => pure A)) fun xs => do
+  -- `patSaved` still mentions the hole metavariables *syntactically*, because `Expr` is
+  -- immutable; `Expr.replace` swaps them for the fvars before `instantiateMVars` fills in
+  -- everything else.
+  let body ← instantiateMVars <| patSaved.replace fun
+    | .mvar m => (holeIdx m).map (xs[·]!)
+    | _       => none
+  let F ← mkLambdaFVars xs body                  -- `A → ⋯ → A → A`, non-dependent
+```
+
+and then fold `mkCongr` starting from `Eq.refl F`:
+
+```lean
+hcongr : F x₁ ⋯ xₙ = F (cfc f₁ a) ⋯ (cfc fₙ a)
+```
+
+Both sides are β-redexes; `mkExpectedTypeHint` retypes the result as `e = ⟨algebra side⟩` (β is
+defeq at any transparency, and the left-hand side is `e` up to the reducible unification of
+step 6). Finally `mkEqTrans hcongr (← mkEqSymm lemmaInstance)` — or without the `symm` when the
+algebra side is on the left.
+
+The zero-hole case degenerates to `hcongr := rfl`, so no special casing is needed.
+
+### 3.2 Backtracking
+
+Every candidate is tried inside
+
+```lean
+def observing (x : PullM α) : PullM (Option α) := do
+  let sMeta ← Meta.saveState; let sPull ← get
+  try pure (some (← x))
+  catch _ => sMeta.restore; set sPull; pure none
+```
+
+so that a failed candidate leaves neither metavariable assignments nor stray side goals behind.
+Side goals are stored in `State`, hence covered by the same checkpoint.
+
+### 3.3 Side goals
+
+`forallMetaTelescope` produces metavariables whose types may be `autoParam T tac`. Before a
+metavariable becomes a goal its type is passed through `consumeAutoParam` so the user sees `T`.
+For each undischarged metavariable in order:
+
+1. if its type is defeq to `p a` for the lemma's mode, assign the cached shared `?ha`;
+2. otherwise convert it to a synthetic-opaque metavariable and push it onto `State.sideGoals`.
+
+(Natural metavariables cannot be returned as goals directly; the routine creates a fresh
+synthetic-opaque one of the same type and assigns the natural one to it.)
+
+## 4. Frontend (`Frontend.lean`)
+
+```lean
+structure Config where
+  unital    : Bool := true    -- prefer the unital calculus
+  discharge : Bool := false   -- run cfc_tac/cfc_cont_tac/cfc_zero_tac on side goals
+  maxDepth  : Nat  := 48
+declare_config_elab elabConfig Config
+```
+
+`Option Bool` cannot be used with `+flag`/`-flag` syntax (Lean rejects non-boolean fields), so
+`unital` is a plain `Bool` read as "*prefer* unital", with automatic fallback to `cfcₙ` when no
+unital instance exists. This gives the same expressiveness with standard syntax.
+
+Tactic mode:
+
+* infer `R`/`a` if absent by scanning the goal for a `CFCApp`, right-hand side first;
+* find the arguments of the target to pull on: the target is `mkAppN rel args`; take the trailing
+  arguments whose type is `A` (at most two);
+* run `pull` on each, tolerating individual failures;
+* rebuild the target with `mkCongr`/`mkCongrArg` over the relation, close the old goal with
+  `mkEqMPR`, and `try rfl` on the new one;
+* post-process side goals (`assumption`, then optionally the auto-param tactics), and
+  `setGoals` with what survives, main goal first.
+
+Conv mode: `Conv.getLhs`, run `pull`, `Conv.updateLhs newLhs proof`, then append the side goals.
+
+## 5. Milestones
+
+1. **`Attr.lean`** — data structures, classification, extensions, attribute. Test by tagging a
+   handful of lemmas and dumping the index with a `#cfc_pull_index` command (kept as a debug aid
+   behind a `set_option`, or simply as a `run_cmd` in the test file).
+2. **`Core.lean` skeleton** — modes, predicate cache, `Id` and "already a `cfc`" steps, no
+   lemma index. Enough to prove `a = cfc (fun x ↦ x) a` and `cfc f a = cfc f a`.
+3. **`Pull` lemma application** — the routine of §3, with congruence building. Target:
+   §8.1 of `Spec.md` (`star a * a`).
+4. **Conversions** — `Unital` and `Scalar`, with the BFS. Target: §8.2 (`a⁺` over `ℂ`).
+5. **Composition** — step 2 of the algorithm plus the `Compose` index. Target: §8.3.
+6. **Frontend polish** — inference of `R`/`a`, conv mode, `+discharge`, tracing.
+7. **Lemma tagging** — work through `Spec.md` §9 and `Examples.lean`, fixing what breaks.
+
+Each milestone is a commit; `Examples.lean` is the running test suite and is kept compiling
+throughout (examples not yet supported stay behind `sorry`).

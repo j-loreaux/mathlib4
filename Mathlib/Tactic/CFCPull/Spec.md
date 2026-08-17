@@ -10,294 +10,444 @@ the continuous functional calculus are equal. One first moves `cfc` to the head 
 within each term, and then applies `cfc_congr` to reduce the problem to showing that the
 corresponding functions are equal on the spectrum.
 
-## Simple examples
+> **Status.** This document is the *normative* specification. The companion document
+> `Design.md` records the implementation plan and the metaprogramming techniques used.
 
-Consider the examples in `Examples.lean`. For each example, there is a term on the left-hand
-side, and an equal term on the left-hand side with `cfc` (or `cfcₙ`) at the head of the expression.
-Each of these examples should be solved by the `cfc_pull` tactic (modulo adding necessary
-assumptions, or deferring them as side goals to be solved by the user, about continuity or whether
-the element in question satisfies the relevant predicate involving that continuous functional
-calculus).
+## Contents
 
-## The `cfc_pull` attribute
+1. [The core operation](#1-the-core-operation)
+2. [User-facing syntax](#2-user-facing-syntax)
+3. [Scalar rings](#3-scalar-rings)
+4. [Predicates](#4-predicates)
+5. [The `cfc_pull` attribute](#5-the-cfc_pull-attribute)
+6. [The algorithm](#6-the-algorithm)
+7. [Side goals](#7-side-goals)
+8. [Worked examples](#8-worked-examples)
+9. [Lemmas to tag](#9-lemmas-to-tag)
+10. [Errors, tracing and limits](#10-errors-tracing-and-limits)
+11. [Deliberate non-goals and future work](#11-deliberate-non-goals-and-future-work)
 
-This should become a Lean attribute used to mark lemmas (e.g., `@[cfc_pull]`) that should be used
-by the `cfc_pull` tactic. Such lemmas should have the form in `Examples.lean` (possibly with the
-equality in the reversed direction), where one side of the expression has a head symbol of `cfc`
-(or `cfcₙ`) and the other side is a different head symbol (at reducible transparency). There will
-be a handful of lemmas where both sides have `cfc` as the head symbol. This occurs, for example,
-when switching between different scalar rings (as in [`cfc_nnreal_eq_real`](https://leanprover-community.github.io/mathlib4_docs/Mathlib/Analysis/CStarAlgebra/ContinuousFunctionalCalculus/Instances.html#cfc_real_eq_nnreal)) or switching between
-the non-unital and unital functional calculi (as in [`cfcₙ_eq_cfc`](https://leanprover-community.github.io/mathlib4_docs/Mathlib/Analysis/CStarAlgebra/ContinuousFunctionalCalculus/NonUnital.html#cfc%E2%82%99_eq_cfc)), or for composition lemmas (as in [`cfc_comp`](https://leanprover-community.github.io/mathlib4_docs/Mathlib/Analysis/CStarAlgebra/ContinuousFunctionalCalculus/Unital.html#cfc_comp) or [`cfc_comp_pow`](https://leanprover-community.github.io/mathlib4_docs/Mathlib/Analysis/CStarAlgebra/ContinuousFunctionalCalculus/Unital.html#cfc_comp_pow)).
+---
 
-The processing for the `cfc_pull` attribute should categorize the lemma into one of
-four possible categories:
+## 1. The core operation
 
-1. Pull: these have `cfc` as the head symbol on only one side.
-2. Scalar: these have `cfc` on both sides, but operate over different scalar rings
-3. Unital: these lemmas relate `cfcₙ` to `cfc`.
-4. Compose: these lemmas have `cfc` on both sides, but applied to different elements of the algebra.
+Everything in the tactic is built out of a single recursive `MetaM` operation.
 
+> **`pull`.** Fix a *target*
+> * a scalar ring `R`,
+> * an element `a : A`,
+> * a unitality flag `u : Bool` (`true` ⇝ `cfc`, `false` ⇝ `cfcₙ`).
+>
+> Call the triple `(R, a, u)` the **mode**. Given an expression `e : A`, `pull` produces a
+> function `f : R → R` and a proof of
+> ```
+> e = cfc f a          (if u)          e = cfcₙ f a         (if ¬u)
+> ```
+> together with a list of *side goals* (metavariables) that the proof depends on.
 
-For each category, different information should be stored by the attribute:
+Note that the direction of the equation is `e = cfc f a`: the recursion is *bottom-up* and each
+step composes proofs with `Eq.trans` and congruence. There are no "output metavariables"
+threaded through the recursion; the spec's original sketch (creating `?f₁`, `?hf₁`, ... and
+relying on later unification to fill them in) describes the same algorithm in a more indirect
+way. Returning `(f, proof)` pairs directly is equivalent, easier to reason about, and makes
+backtracking straightforward.
 
-1. Pull lemmas should store: the head symbol (at reducible transparency, used for indexing) for
-  the non-`cfc` side, the scalar ring used by the `cfc` and the function on which it's applied,
-  and whether the `cfc` is unital or non-unital (i.e., `cfc` or `cfcₙ`).
-2. Scalar lemmas should store: the scalar rings and whether it is unital or non-unital.
-3. Unital lemmas should store the scalar ring.
-4. Compose lemmas should store the scalar ring, unitality, and the head symbol inside the algebra
-  element. For example, in `cfc_comp` the head symbol would *itself* be `cfc` (because the
-  argument is `cfc f a`), whereas in `cfc_comp_pow` the head symbol would be `HPow.hPow` because
-  the argument is `a ^ n`.
+All matching against `e` and all comparisons with `a` are done at **reducible** transparency, as
+is standard for Lean tactics. In particular `cfc`, `cfcₙ`, `CFC.sqrt`, `CFC.log`, `posPart`, …
+never unfold on their own: the tactic only ever "sees through" a definition when a lemma tagged
+`@[cfc_pull]` tells it to.
 
-## Scalar rings
+The rest of the tactic is a thin frontend that decides *where* in the goal `pull` should be
+applied and *what* the mode should be.
 
-The scalar rings come in essentially 5 flavors: `ℂ`, `ℝ`, `ℝ≥0`, `𝕜` (with `RCLike 𝕜`), or
-some generic commutative semiring `R`. Probably there should be an inductive type used by the
-tactic representing each of these.
+## 2. User-facing syntax
 
-There is an ordering on these flavors which determines when a `cfc` expression over one either
-applies generally or can be switched to one over the other flavor. This ordering is:
-`ℝ≥0 → ℝ`, `ℝ → ℂ`, `𝕜 → ℝ`, `𝕜 → ℂ` and `R → _`.
-
-(Note: now that I think about it, there should maybe be yet one more flavor: generic commutative
-rings. In practice, the only concrete types we care about that fall into this category are `ℝ` and
-`ℂ`, so it seems like `RCLike` suffices. However, some lemmas don't actually have that as a
-hypothesis, e.g., `cfc_sub`, and only assume `CommRing`. I'm not sure whether this is a problem
-or not, but let's table it for now, and only return to it if we determine it will cause issues.)
-
-## Predicates
-
-Attached to each scalar ring, there is a predciate associated the continuous functional calculus.
-For `ℂ`, `ℝ` and `ℝ≥0`, there are `IsStarNormal`, `IsSelfAdjoint` and `(0 ≤ ·)`, respectively,
-whereas for `𝕜` or `R`, it will be some variable `p : A → Prop` (this is an `outParam` determined
-by the relevant `ContinuousFunctionalCalculus R A p` instance).
-
-## Sketch of the behavior of the tactic by example
-
-We'll analyze a few different examples highlighting the different kinds of
-situations which may arise.
-
-### Example 1: a simple pull example
-
-Let's consider the first example from `Examples.lean`
-
-```lean
-variable {R A : Type*} {p : A → Prop} [CommSemiring R]
-  [StarRing R] [MetricSpace R] [IsTopologicalSemiring R] [ContinuousStar R] [Ring A]
-  [StarRing A] [TopologicalSpace A] [Algebra R A] [ContinuousFunctionalCalculus R A p]
-  [ContinuousMap.UniqueHom R A] {a : A} {f g : R → R}
-
-example (ha : p a) :
-    star a * a = cfc (fun x : R ↦ star x * x) a := by
-  rw [cfc_mul .., cfc_star, cfc_id' ..]
+```
+cfc_pull (config)? (R)? (a)?
+```
+and, in `conv` mode,
+```
+conv ... => cfc_pull (config)? (R)? (a)?
 ```
 
-The idea is that `cfc_mul`, `cfc_star` and `cfc_id'` would all be marked `@[cfc_pull]` and
-categorized as pull lemmas. The user would supply information to the tactic, like the scalar
-ring `R`, the element `a`, whether the cfc should be unital or not, and the expression
-(given by a pattern e.g., `star _ * _`) in which to perform the pull. If no pattern is given,
-then the expression is assumed to be an equality (or maybe and inequality?) and the pull operation
-is performed on both sides. Specifying unitality should be optional (maybe with the `+unital`
-syntax to specify the boolean value) because it can be determined from `a : A` by searching for
-an instance of `One A` and defaulting to unital if instance search succeeds.
+* `R` is the scalar ring, `a` the element of the algebra. Both are optional and positional; if
+  `a` is omitted it must be inferrable, and if `R` is omitted both must be inferrable (you cannot
+  give `a` without `R`).
+* **Inference.** If either is omitted, the tactic scans the goal for a subterm of the form
+  `cfc f b` or `cfcₙ f b`, preferring the right-hand side of a relation, and takes `R`/`a` from
+  it. This makes `cfc_pull` alone work for the common goal shape `lhs = cfc f a`.
+* **Configuration** (standard `optConfig` syntax):
+  * `+unital` / `-unital` (default `+unital`). Read as *prefer* the unital calculus: with
+    `+unital` the tactic uses `cfc` whenever a unital `ContinuousFunctionalCalculus R A p`
+    instance exists, and silently falls back to `cfcₙ` when it does not (e.g. in a non-unital
+    algebra). With `-unital` the tactic always produces `cfcₙ`.
+  * `+discharge` (default `false`). Attempt to close the collected side goals with the standard
+    auto-param tactics (`cfc_tac`, `cfc_cont_tac`, `cfc_zero_tac`), chosen by the shape of the
+    goal. Off by default, per the original spec; see [§7](#7-side-goals).
+  * `(maxDepth := n)` (default `48`), a recursion-depth guard.
 
-So, in this example, the user writes something like `cfc_pull R a` in place of the `rw`.
-The tactic then proceeds as follows:
+### Behaviour on the goal
 
-0. It gathers background information:
-  + checks for the `One A` instance and determines that this is a unital problem.
-  + categorizes the scalar ring `R` as a generic one, since it doesn't match `ℝ≥0`, `ℝ` or `ℂ`,
-    and there is no `RCLike R` instance in context.
-  + searches for a `ContinuousFunctionalCalculus R A ?p` instance, and assigns `?p` to `p`,
-    so that now it knows the relevant predicate.
-  + searches for and saves for future use `ha : p a`. It first checks the context and/or calls
-    `cfc_tac` to produce this.
-1. Sees that the head symbol is an equality, so proceeds to `cfc_pull` on both sides.
-2. On the right, it sees `cfc` as the head symbol already *and, crucially* it is `cfc (_ : R → R) a`
-  so it is already in the required form, so nothing is done.
-3. On the left, it sees `HMul.hMul` as the head symbol.
-4. It then looks up in its lemma index (registered with the `@[cfc_pull]` attribute) pull lemmas
-  with the same head symbol (it's possible for there to be multiple lemmas; in such cases there
-  should be additional information used to determine which one to pick, e.g., which scalar ring
-  is being used) and satisfying the correct unitalit condition.
-5. In this case, it would see that `cfcₙ_mul` and `cfc_mul` both have the correct head symbol,
-  but only the latter is explicitly unital, so that one is preferred.
-6. It then creates metavaribles `?f₁ : R → R` and `?g₁ : R → R`, `?hf₁ : cfc ?f₁ a = star a` and
-  `?hg₁ : cfc ?g₁ a = a`. It creates additional metavariables for the `ContinuousOn` arguments of
-  `cfc_mul`. It the creates the expression `star a * a = cfc (fun x ↦ ?f₁ x * ?g₁ x) a` using
-  these metavariables and the lemma `cfc_mul`.
-  At this point, once unification (later) assigns `?f₁` and `?g₁`, the tactic will have accomplished
-  its goal.
-7. It then recursively tries to perform `cfc_pull` on both `?hf₁` and `?hg₁`.
-8. On `?hg₁` it sees `a`, since this is the variable we care about, it knows that it can use
-  `cfc_id'` to get `cfc (fun x : R ↦ x) a = a`, and combining this with `?hg₁` it can produce
-  a term of type `cfc ?g₁ a = cfc (fun x : R ↦ x) a`, which it then unifies to assign
-  `?g₁ ≟ (fun x : R ↦ x)`.
-9. On `?hf₁` it sees the head symbol `Star.star` and then searches the index to find `cfc_star`.
-  It creates metavariables `?f₂ : R → R` and `?hf₂ : a = cfc ?f₂ a`. and it creates a term of
-  type `cfc ?f₁ a = cfc (fun x ↦ star (?f₂ x)) a` using `?hf₁`, `?hf₂` and `cfc_star`, and then
-  unification assigns `?f₁ ≟ fun x ↦ star (?f₂ x)`.
-10. Finally, the recusion applies `cfc_pull` to `?hf₂`, similarly to step 8.
-11. At this point all *function* metavariables created during this procedure
-  have been assigned, which we consider success.
-  Remaining metvariables are returned to the user. *Hopefully*(?) these should only
-  be `ContinuousOn` goals, as the `p a` goals should be filled by the tactic in
-  the process of creating the terms.
-  In this particular case, the `ContinuousOn` goals should be solvable by
-  `fun_prop`.
+In tactic mode, the goal must be an application `rel lhs rhs` whose last two explicit arguments
+have type `A` (this covers `=`, `≤`, `<`, `≠`, …), or an application `f lhs` with a single such
+argument. `pull` is run on each such argument; failures on individual arguments are tolerated as
+long as at least one argument succeeds and at least one argument actually changes. The goal is
+then replaced by the corresponding relation between the pulled terms, and `rfl` is attempted on
+the result (which closes goals like `star a * a = cfc (fun x ↦ star x * x) a` outright).
 
-A few notes:
+In `conv` mode the current `conv` target is pulled, which gives the user complete control over
+*where* the pull happens; this replaces the "pattern" idea in the original draft, at no cost in
+expressiveness and with no new syntax to learn.
 
-+ the procedure is deemed successful if all function metavariables are assigned.
-+ errors can occur if no applicable indexed lemma matches the required
-  specification, or if something during the initial background stage fails
-+ the tactic should be written with `trace`ing available so that the user can
-  inspect the failure by turning tracing on, and in particular to see which
-  lemmas were (potentially) available, which matched, which hypotheses were
-  automatically filled, etc.
-+ while we could try to solve `ContinuousOn` goals in the process of the tactic
-  using tools like `fun_prop`, let's try to avoid that for now as it adds an
-  additional layer of complexity. Perhaps in a future iteration we can add this
-  as an opt-in feature via a customization option.
+## 3. Scalar rings
 
-### Example 2: changing scalar rings and unitality
-
-Here's another example from `Examples.lean`
+A tagged lemma's scalar ring is recorded as a **ring key**:
 
 ```lean
-example (ha : IsSelfAdjoint a) :
-    a⁺ = cfc (fun z : ℂ ↦ z.re⁺) a := by
-  sorry
+inductive RingKey
+  | const (n : Name)   -- the lemma is about a fixed ring, e.g. `Real`, `Complex`, `NNReal`
+  | any                -- the lemma is polymorphic in its scalar ring
 ```
 
-The idea here is that `CFC.posPart_def`, `cfc_real_eq_complex` and `cfcₙ_eq_cfc` are marked with
-`@[cfc_pull]` and are categorized as pull, scalar and unital lemmas, respectively.
+`RingKey.any` covers *both* the "generic commutative (semi)ring `R`" case and the `RCLike 𝕜`
+case. There is no need to distinguish them: a lemma stated for `RCLike 𝕜` simply fails instance
+synthesis when the tactic tries to use it at `ℝ≥0`, and the candidate is discarded by
+backtracking. The same mechanism resolves the `CommRing` vs. `CommSemiring` question raised in
+the original draft (e.g. `cfc_sub` only assumes `CommRing R`): no bookkeeping is required,
+instance synthesis is the arbiter.
 
-The example here works as follows, with the user requesting `cfc_pull +unital ℂ a`.
-The tactic then proceeds as follows:
+The "ordering on scalar rings" of the original draft splits into two genuinely different notions:
 
-0. It gathers background information:
-  + checks for the `One A` instance since the user requested `+unital`.
-  + categorizes the scalar ring as `ℂ`
-  + searches for a `ContinuousFunctionalCalculus ℂ A IsStarNormal` instance, since we already
-    know what the predicate must be.
-  + searches for and saves for future use `IsStarNormal a`. It first checks the context and doesn't
-    find this, but `cfc_tac` should succeed in producing it.
-1. sees an equality and that the right-hand side is already in the required form
-2. on the left, sees the head symbol `PosPart.posPart` and looks up lemmas that match.
-  In this case, it only finds `CFC.posPart_def`, which doesn't match the scalar ring (`ℝ` vs. `ℂ`)
-  or unitality. However, this is okay because `ℝ → ℂ` in the scalar ring ordering and it's fine to
-  use a non-unital lemma when you need a unital one (although unital specific lemmas should be
-  preferred, when available).
-4. So the tactic rewrites `a⁺` to `cfcₙ (fun x : ℝ → x⁺) a`. (side note: should there be a special
-  class of `cfc_pull` lemmas called *unfold* lemmas?)
-5. It then tries to recursively pull on this new expression. It sees `cfcₙ` as the head symbol,
-  but it's got a `+unital` specification, so it's looking for `cfc`. It finds `cfcₙ_eq_cfc` and
-  rewrites with that.
-6. Finally, it has `cfc (fun x : ℝ → x⁺) a`, but it needs to work over the scalar ring `ℂ`, so it
-  searches for a scalar ring transition lemma and finds `cfc_real_eq_complex`, but in order to do
-  this, it needs an `IsSelfAdjoint a` hypothesis. It would be nice if the tactic could try to supply
-  this automatically, but maybe that should be part of the background information step?
+* **Specialisation.** A lemma with key `any` can be used at *any* target ring, subject to
+  instance synthesis. This is the `R → _` and `𝕜 → ℝ`, `𝕜 → ℂ` part of the draft's ordering.
+* **Conversion.** A result *already established* over ring `S` can be moved to ring `T` by a
+  `Scalar`-category lemma (see [§5](#5-the-cfc_pull-attribute)). The available conversions form a
+  directed graph whose edges are exactly the tagged `Scalar` lemmas; the tactic finds a shortest
+  path by breadth-first search. With the lemmas listed in [§9](#9-lemmas-to-tag) the graph is
+  `ℝ≥0 → ℝ → ℂ` (in both unital and non-unital flavours), which is the draft's `ℝ≥0 → ℝ`,
+  `ℝ → ℂ`. Nothing about `ℝ≥0`, `ℝ`, `ℂ` is hard-coded: the graph is whatever has been tagged.
 
-Some notes:
+## 4. Predicates
 
-+ When in `+unital` mode, a match of the form `cfcₙ _ a` (where `a` is the element the user
-  specified), should immediately opt for `cfcₙ_eq_cfc` even if the scalar ring doesn't match
-  as this will minimize side goals moving forward.
-+ I feel like changing the scalar ring should always happen last, if possible, but I'm not confident
-  about this. I think there may be cases where this would be suboptimal.
+Attached to each scalar ring there is a predicate associated with the continuous functional
+calculus. For `ℂ`, `ℝ` and `ℝ≥0` these are `IsStarNormal`, `IsSelfAdjoint` and `(0 ≤ ·)`
+respectively; for a generic `R` it is a variable `p : A → Prop`.
 
-### Example 3: composition
+The tactic never hard-codes these. Instead, for each mode `(R, u)` it synthesises
 
-Care needs to be taken when the head symbol is `cfc` (or `cfcₙ`).
-In the previous example, we addressed the case when we're working in the `+unital` setting on an
-element `a`, over a scalar ring `R` and we match `cfc (_ : ?S → ?S) a` or `cfcₙ (_ : ?S → ?S) a`
-where `?S` is a possibly different scalar ring from `R`. But there are times when we encounter
-`cfc (_ : ?S → ?S) ?b` or `cfcₙ (_ : ?S → ?S) ?b` when the unification `?b ≟ a` fails (reducible transparency).
-In these cases, what should be done?
-Of course, in the `+unital` case, we should still switch `cfcₙ` to `cfc` with `cfcₙ_eq_cfc`.
-When unification of `?S ≟ R` fails, then we should try to `cfc_pull` on `?b` with scalar ring `?S`,
-*not* `R`.
-Then, once we finish this, we switch the scalar ring to `R`.
-Of course, if `?S` does not precede `R` in the ordering on scalar rings, we should stop and error.
+```lean
+ContinuousFunctionalCalculus R A ?p            -- if u
+NonUnitalContinuousFunctionalCalculus R A ?p   -- if ¬u
+```
 
-Consider the following example from `Examples.lean`.
+and reads `p` off the `outParam`. It then creates **one** metavariable `?ha : p a` per mode,
+caches it, and uses it for every `p a` hypothesis of every lemma applied at that mode. So a
+successful run leaves at most one `p a` goal per scalar ring used, not one per lemma
+application.
+
+## 5. The `cfc_pull` attribute
+
+```
+@[cfc_pull] @[cfc_pull ←] @[cfc_pull (prio)]
+```
+
+marks a lemma for use by the tactic. `←` uses the lemma right-to-left. Tagged lemmas must be
+equations `lhs = rhs` in which at least one side has `cfc` or `cfcₙ` as its head symbol. The
+attribute analyses the statement (under `forallTelescope`, so that instance hypotheses are in
+scope) and sorts it into one of **five** categories. (The draft had four; the `Id` category is
+split off from `Pull` because its algebra side has no head symbol to index on.)
+
+Write `E` for the `cfc`/`cfcₙ` **element** argument and `F` for its **function** argument.
+
+| Category | Shape | Recognised by |
+|---|---|---|
+| `Id`      | `cfc (fun x ↦ x) a = a` | exactly one side is a cfc-application, and the other side is exactly its element argument |
+| `Pull`    | `cfc F a = ⟨algebra expression⟩` | exactly one side is a cfc-application |
+| `Scalar`  | `cfc (F : S → S) a = cfc (G : T → T) a` | both sides are cfc-applications with **different** scalar rings |
+| `Unital`  | `cfcₙ F a = cfc F a` | both sides are cfc-applications, same ring, **different** unitality |
+| `Compose` | `cfc (fun x ↦ F (G x)) a = cfc F ⟨expression in a⟩` | both sides are cfc-applications, same ring and unitality, **different** elements |
+
+Stored data per category:
+
+* **`Id`** — the ring key and unitality. Indexed by `(ringKey, unital)`.
+* **`Pull`** — the ring key, the unitality, which side carries the `cfc`, the number of
+  *holes* (see below) and a `DiscrTree` key computed from the algebra side. Indexed by that
+  `DiscrTree`.
+
+  A **hole** is a maximal subterm of the algebra side which is itself a `cfc`/`cfcₙ` application
+  at the same ring, unitality and element as the cfc side, and whose function argument is a
+  variable bound by the lemma. In `cfc_mul : cfc (fun x ↦ f x * g x) a = cfc f a * cfc g a` the
+  holes are `cfc f a` and `cfc g a`; in `cfc_pow_id : cfc (· ^ n) a = a ^ n` there are none. The
+  `DiscrTree` key is computed after replacing the holes by wildcards, so `cfc_mul` is indexed
+  under `HMul.hMul _ _ _ _ * *`.
+
+  Holes may occur anywhere in the algebra side except under a binder that they mention (so
+  `cfc_sum : cfc (∑ i ∈ s, f i) a = ∑ i ∈ s, cfc (f i) a` is *not* supported; it is rejected at
+  tagging time with an explanatory error).
+* **`Scalar`** — source ring key, target ring key, unitality. Stored as an edge list.
+* **`Unital`** — the ring key and which side is non-unital. Stored as a list; usable in both
+  directions (right-to-left needs no extra hypotheses beyond those of the lemma).
+* **`Compose`** — the ring key, the unitality, and the head symbol of the *structured* element,
+  i.e. of the element argument on whichever side is not a bare variable. For `cfc_comp'` the
+  head symbol is `cfc` itself; for `cfc_comp_pow` it is `HPow.hPow`. Indexed by head symbol.
+
+Tagging a lemma that does not fit any category is an error, and the error message says why.
+
+## 6. The algorithm
+
+### 6.1 Setup (frontend)
+
+0. Elaborate `R` and `a`, or infer them from the goal. Set `A := ` the type of `a`.
+1. Determine unitality: with `+unital`, synthesise `ContinuousFunctionalCalculus R A ?p`; if it
+   fails, fall back to non-unital. With `-unital`, go straight to non-unital.
+2. Read the predicate `p` off the instance and allocate the shared `?ha : p a` metavariable.
+3. Locate the arguments of the goal to be pulled (§2), and call `pull` on each.
+
+### 6.2 `pull mode e`
+
+The steps are tried in order; the first that succeeds wins, and any step may be undone by
+backtracking (the `MetaM` state is checkpointed around every candidate).
+
+1. **Identity.** If `e` and `a` are defeq at reducible transparency, use the `Id` lemma for
+   `mode` (or for a mode convertible to `mode`; see step 5). Result: `f := fun x ↦ x`.
+
+   This *must* be tried first: `a` may itself be e.g. `star b * b`, and decomposing it would be
+   wrong.
+
+2. **Existing calculus.** If `e` is `cfc g b` or `cfcₙ g b` — say at mode `m'` — then:
+   * if `b` is defeq to `a`: the result is `(g, rfl)` at mode `m'`; go to step 5.
+   * otherwise this is a **composition**. Let `h` be the head symbol of `b`.
+     * If a `Compose` lemma for `(m', h)` matches, apply it. This rewrites `cfc g b` to
+       `cfc g' b'` with `b'` a proper subterm of `b`, and the algorithm recurses on the result.
+       (E.g. `cfc f (a ^ n)` ⇝ `cfc (fun x ↦ f (x ^ n)) a` via `cfc_comp_pow`.)
+     * Otherwise, recurse on `b` at mode `m'`, obtaining `b = cfc h a`, use `congrArg` to get
+       `cfc g b = cfc g (cfc h a)`, and finish with the `Compose` lemma whose head symbol is
+       `cfc` (i.e. `cfc_comp'`). This requires a `UniqueHom` instance; if it is missing, the
+       tactic reports that specifically.
+
+3. **Tagged pull lemmas.** Look up the head of `e` in the `Pull` index and try the candidates in
+   order of preference:
+   1. lemmas whose mode is exactly `mode`;
+   2. lemmas whose ring key is `any` (they will be *specialised* to `mode`'s ring);
+   3. lemmas at a different ring or unitality, which will need a conversion in step 5 —
+      ordered by the length of the conversion path.
+
+   Within a group, higher attribute priority first, then fewer holes first (a lemma with no
+   holes, like `cfc_pow_id`, is more specific than `cfc_pow` and produces fewer side goals).
+
+   Applying a candidate:
+   1. Instantiate the lemma with metavariables.
+   2. Assign the lemma's `A`, `R`, `p` and *element* arguments from the target mode. Assigning
+      the element **before** matching is what makes lemmas whose algebra side does not mention
+      the element (like `cfc_const_one : cfc (fun _ ↦ 1) a = 1`) work, and what forces lemmas
+      like `cfc_pow_id` to match only at the right element.
+   3. Synthesise all instance-implicit arguments. Failure here rejects the candidate — this is
+      how `cfc_sub` is prevented from being used over `ℝ≥0`, and how `RCLike` lemmas are
+      restricted to `RCLike` rings.
+   4. Replace the holes of the algebra side by fresh metavariables and unify the result with `e`
+      at reducible transparency.
+   5. Recurse on the terms the holes were matched against, at the *lemma's* mode.
+   6. Assign the recursively found functions to the lemma's function variables, discharge or
+      collect the remaining hypotheses (§7), and assemble the proof:
+      `e = ⟨algebra side⟩` by congruence, then the lemma itself, then β-reduce the resulting
+      function.
+
+4. **Failure.** If no candidate applies, `pull` fails for `e`. The trace records every candidate
+   considered and why it was rejected.
+
+5. **Conversion.** Steps 1–3 may produce a result at a mode `m'` different from the requested
+   `mode`. It is converted in two stages, unitality first, then the scalar ring:
+   * `cfcₙ f a = cfc f a` (`Unital` category) — used left-to-right to make a non-unital result
+     unital, right-to-left in the other direction. Doing this first keeps the `f 0 = 0` side
+     goal about the smallest possible function, and implements the draft's rule that a `cfcₙ`
+     at the right element should immediately become a `cfc` in `+unital` mode.
+   * a shortest path in the `Scalar` graph from `m'`'s ring to `mode`'s ring.
+
+   If no conversion exists, the result is rejected and the caller backtracks.
+
+### 6.3 Termination
+
+The recursion is structural in `e` except for step 2, where `Compose` lemmas replace `b` by a
+proper subterm, and step 5, which is not recursive. A `maxDepth` guard (default 48) is
+nevertheless enforced, so that a badly-tagged lemma set degrades into an error rather than a
+hang.
+
+## 7. Side goals
+
+Every hypothesis of an applied lemma that is not an instance and not discharged becomes a side
+goal. The tactic handles them as follows.
+
+* Hypotheses defeq to `p a` for the mode of the lemma are assigned the cached, shared `?ha`
+  metavariable (§4).
+* Everything else — `ContinuousOn f (spectrum R a)`, `ContinuousOn f (σₙ R a)`, `f 0 = 0`,
+  `∀ x ∈ spectrum R a, f x ≠ 0`, … — becomes a fresh synthetic-opaque metavariable, `autoParam`
+  wrappers stripped so the goal displays cleanly.
+* Once the whole pull is finished (so that no function metavariables remain), the frontend
+  tries `assumption` on each collected goal, and, if `+discharge` was given, the appropriate
+  auto-param tactic (`cfc_cont_tac` for `ContinuousOn`, `cfc_zero_tac` for `_ 0 = 0`, `cfc_tac`
+  otherwise).
+* Surviving goals are returned to the user, after the main goal, in the order they were created.
+
+Grouping the goals into conjunctions or giving them user-visible case names is left to a later
+iteration, as the draft suggests.
+
+## 8. Worked examples
+
+### 8.1 A simple pull
+
+```lean
+example (ha : p a) : star a * a = cfc (fun x : R ↦ star x * x) a := by
+  cfc_pull R a
+```
+
+Setup: `A` is the type of `a`; `ContinuousFunctionalCalculus R A ?p` synthesises and assigns
+`?p := p`; the shared `?ha : p a` is created and later closed by `assumption`.
+
+The goal is `Eq`, so both sides are pulled.
+
+*Right-hand side.* Step 2 matches `cfc (fun x : R ↦ star x * x) a` with `b := a`, mode already
+correct; the result is the function itself with proof `rfl`.
+
+*Left-hand side.* Step 1 fails (`star a * a` is not `a`). Step 3 looks up `HMul.hMul` and finds
+`cfc_mul`, ring key `any`, unital. Its algebra side `cfc ?f ?a * cfc ?g ?a` has two holes;
+after replacing them the pattern is `?x₁ * ?x₂`, which unifies with `star a * a`.
+
+* Recursing on `star a`: step 3 finds `cfc_star`, whose algebra side is `star (cfc ?f ?a)`, one
+  hole; the pattern `star ?x` matches, and recursing on `a` hits step 1, giving `fun x ↦ x`.
+  So `star a = cfc (fun x ↦ star ((fun y ↦ y) x)) a`, β-reduced to `fun x ↦ star x`.
+* Recursing on `a`: step 1, `fun x ↦ x`.
+
+`cfc_mul` then gives `star a * a = cfc (fun x ↦ star x * x) a`, with side goals
+`ContinuousOn (fun x ↦ star x) (spectrum R a)` and `ContinuousOn (fun x ↦ x) (spectrum R a)`,
+plus the shared `p a`.
+
+Both sides now read `cfc (fun x ↦ star x * x) a`, so the main goal is closed by `rfl` and only
+the side goals remain (all closed by `cfc_pull +discharge R a`, or by `<;> fun_prop`).
+
+### 8.2 Changing scalar ring and unitality
+
+```lean
+example (ha : IsSelfAdjoint a) : a⁺ = cfc (fun z : ℂ ↦ (z.re⁺ : ℝ)) a := by
+  cfc_pull ℂ a
+```
+
+Setup determines mode `(ℂ, unital)` with predicate `IsStarNormal`.
+
+The left-hand side `a⁺` has head `posPart`. The index yields `CFC.posPart_def`, whose mode is
+`(ℝ, non-unital)` — neither the ring nor the unitality matches, but a conversion path exists, so
+it is tried (step 3, group 3). It has no holes, so it applies immediately, giving
+`a⁺ = cfcₙ (·⁺ : ℝ → ℝ) a` at mode `(ℝ, non-unital)`.
+
+Step 5 then converts: first `cfcₙ_eq_cfc` (side goals `ContinuousOn (·⁺) (σₙ ℝ a)` and
+`(0 : ℝ)⁺ = 0`, and the shared `IsSelfAdjoint a`), then the single `Scalar` edge
+`cfc_real_eq_complex` (side goal: the same shared `IsSelfAdjoint a`), producing
+`a⁺ = cfc (fun z : ℂ ↦ ((z.re)⁺ : ℝ)) a`.
+
+Both sides agree and `rfl` closes the goal.
+
+### 8.3 Composition
 
 ```lean
 example (ha : p a) (hf : ContinuousOn f ((· ^ 2) '' spectrum R a)) :
     cfc f (a ^ 2) = cfc (fun x ↦ f (x ^ 2)) a := by
-  rw [cfc_comp_pow ..]
+  cfc_pull R a
 ```
 
-So, in this example, the user writes something like `cfc_pull R a` in place of the `rw`.
-The tactic then proceeds as follows:
+The left-hand side is `cfc f (a ^ 2)`; step 2 applies, `a ^ 2` is not defeq to `a`, so its head
+`HPow.hPow` is looked up in the `Compose` index, finding `cfc_comp_pow`. Its structured element
+`?a ^ ?n` unifies with `a ^ 2` giving `?a := a`, which *is* our element, so the recursion stops
+immediately with `cfc (fun x ↦ f (x ^ 2)) a`.
 
-0. It gathers background information:
-  + checks for the `One A` instance and determines that this is a unital problem.
-  + categorizes the scalar ring `R` as a generic one, since it doesn't match `ℝ≥0`, `ℝ` or `ℂ`,
-    and there is no `RCLike R` instance in context.
-  + searches for a `ContinuousFunctionalCalculus R A ?p` instance, and assigns `?p` to `p`,
-    so that now it knows the relevant predicate.
-  + searches for and saves for future use `ha : p a`. It first checks the context and/or calls
-    `cfc_tac` to produce this.
-1. Sees equality, and checks the right- and left-hand sides.
-  The right-hand side already matches (`cfc (_ : R → R) a`).
-2. The left-hand side matches `cfc (_ : R → R) ?b`, but `?b ≟ a` fails.
-3. At this point, the tactic looks at the head symbol of `?b` (and finds `HPow.hPow`) and searches
-  the index for a *compose* lemma whose head symbol (on the element of the algebra) matches.
-  It finds `cfc_comp_pow`, so it creates a metavariable `?c : A` and assigns `?b = ?c ^ 2`.
-  In this case, in fact this also assigns `?c = a`, and so `cfc_comp_pow` is an exact match and
-  we're done. If it weren't the case that `?c = a`, then we would look at the head symbol of `?c`
-  and search for yet another compose lemma. If the search fails, then we apply `cfc_pull`
-  recursively to `?c`. if successful, we apply `cfc_comp` to the result.
+Had `?a` been something else — as in `cfc f ((cfc g a) ^ 2)` — the algorithm would simply
+recurse on `cfc (fun x ↦ f (x ^ 2)) (cfc g a)`, re-entering step 2, matching `cfc g a` against
+`a` this time, and closing with `cfc_comp'`.
 
-### Example 4: an example from the wild
-
-The following example from `Examples.lean` appears as a goal in Mathlib.
+### 8.4 From the wild
 
 ```lean
 example [Nontrivial A] (ha : IsSelfAdjoint a) (ha_norm : ‖a‖ ≤ 1) :
     a + I • cfcₙ Real.sqrt (1 - a ^ 2) = cfc (fun x ↦ ↑x.re + I * ↑√(1 - x.re ^ 2)) a := by
-  sorry
+  cfc_pull ℂ a
 ```
 
-Here we `cfc_pull ℂ a` and the problem is determined to be unital. We sketch out how this should
-be solved by the tactic with the ideas already in place:
+Mode `(ℂ, unital)`. On the left:
 
-0. gather background information
-1. deal with equality and the right-hand side
-2. match `HAdd.hAdd` and on the first argument use `cfc_id'`
-3. on the second argument, use `cfc_const_mul` (preferred over `cfc_smul` because the scalar type
-  `ℂ` matches the scalar ring we are going for.)
-4. Try to pull (over `ℂ`) on `cfcₙ Real.sqrt (1 - a ^ 2)`. It's non-unital, so we switch to unital
-  with `cfcₙ_eq_cfc`.
-5. Try to pull (over `ℂ`) on `cfc Real.sqrt (1 - a ^ 2)`, but `1 - a ^ 2 ≟ a` fails, so we
-  look for a compose lemma matching the head of `1 - a ^ 2` which is `HSub.hSub`; no such lemma
-  is found.
-6. Default to applying `cfc_comp` (over `ℝ`) with a metavariable of the form
-  `?hf : 1 - a ^ 2 = cfc (?f : ℝ → ℝ) a`, and switching to the `ℂ` scalar ring via
-  `cfc_real_eq_complex`
-7. Try to pull (over `ℝ` now!) on `1 - a ^ 2`
-  match on `HSub.hSub` and proceed as usual (as in the case of the simpler examples like Example 1).
+* `HAdd.hAdd` ⇝ `cfc_add` (ring key `any`), two holes.
+* `a` ⇝ step 1 ⇝ `fun x : ℂ ↦ x`.
+* `I • cfcₙ √(1 - a ^ 2)` ⇝ `cfc_const_mul` is preferred over `cfc_smul` because its scalar
+  argument lives in the target ring `ℂ`; one hole, matched against `cfcₙ √(1 - a ^ 2)`.
+* `cfcₙ Real.sqrt (1 - a ^ 2)` ⇝ step 2 at mode `(ℝ, non-unital)`; `1 - a ^ 2` is not `a` and
+  has no `Compose` lemma for `HSub.hSub`, so recurse on `1 - a ^ 2` at `(ℝ, non-unital)`:
+  `cfcₙ_sub`, `cfcₙ_const_one`(*), `cfcₙ_pow` ⇝ `fun x : ℝ ↦ 1 - x ^ 2`. Then `cfcₙ_comp'`
+  gives `cfcₙ (fun x : ℝ ↦ √(1 - x ^ 2)) a`, and step 5 converts to `(ℂ, unital)`.
 
-## A non-exhaustive list of lemmas that should be tagged `cfc_pull`
+  (*) in a *unital* algebra `1 - a ^ 2` is naturally handled by the unital lemmas; in that case
+  the sub-pull is done at `(ℝ, unital)` and step 5 has only the scalar conversion to do.
 
-Please fill this in.
+The result is `cfc (fun x : ℂ ↦ x + I * ↑√(1 - x.re ^ 2)) a`. Note this is *not* syntactically
+the right-hand side (`↑x.re` versus `x`); both are correct, and `rfl` fails. This is expected
+and is exactly the situation `cfc_pull` is designed for: the user finishes with `cfc_congr`.
 
-## Other considerations
+## 9. Lemmas to tag
 
-+ The heart of this tactic should live in `MetaM` and it should be fundamentally recursive.
-+ The information gathering should probably live in `TacticM` since we'll likely need to access
-  the local context.
-+ It's possible this specification and / or the `Examples.lean` file are incomplete or that the
-  examples don't *quite* match what the final tactic should produce.
-+ It would be nice if there were some sort of convenient collecting / handling of side goals,
-  but I'm not sure what is best. Ideas include:
-  - grouping all `ContinuousOn` goals into a single conjunction, likewise with `?f 0 = 0` goals
-  - providing user accessible names to goals which group them so that they may be solved with
-    `case goal1 | goal2 | goal3 => by fun_prop`
-  - trying to build terms for `ContinuousOn` goals using metavariables as you traverse the
-    expression tree (I expect this to be hard).
-  I recommend saving this kind of goal management for a future iteration of the tactic after we
-  get the basic API up and running.
+Below, "generic" means ring key `any`.
+
+**`Id`**: `cfc_id'`, `cfcₙ_id'`.
+
+**`Pull`, generic, unital**: `cfc_mul`, `cfc_add`, `cfc_sub`, `cfc_neg`, `cfc_pow`, `cfc_smul`,
+`cfc_const_mul`, `cfc_star`, `cfc_const`, `cfc_const_one`, `cfc_const_zero`, `cfc_inv`,
+`cfc_map_div`, `cfc_map_polynomial`; and the more specific, side-goal-cheaper variants
+`cfc_pow_id`, `cfc_smul_id`, `cfc_const_mul_id`, `cfc_star_id`, `cfc_neg_id`.
+
+**`Pull`, generic, non-unital**: `cfcₙ_mul`, `cfcₙ_add`, `cfcₙ_sub`, `cfcₙ_neg`, `cfcₙ_pow`,
+`cfcₙ_smul`, `cfcₙ_const_mul`, `cfcₙ_star`, `cfcₙ_const_zero`; and `cfcₙ_pow_id`,
+`cfcₙ_smul_id`, `cfcₙ_star_id`, `cfcₙ_neg_id`.
+
+**`Pull`, concrete ring**: `CFC.posPart_def`, `CFC.negPart_def` (`ℝ`, non-unital);
+`CFC.sqrt_def` (`ℝ≥0`, non-unital); `CFC.abs_def` (`ℝ≥0`, non-unital, element `star a * a`);
+`CFC.nnrpow_def` (`ℝ≥0`, non-unital); `CFC.rpow_def` (`ℝ≥0`, unital); `CFC.log_def`
+(`ℝ`, unital); `CFC.exp_eq_normedSpace_exp` (generic — it is stated for `RCLike 𝕜`),
+`CFC.real_exp_eq_normedSpace_exp`, `CFC.complex_exp_eq_normedSpace_exp`.
+
+Some of these `_def` lemmas do not yet exist in Mathlib and are added alongside the tactic
+(`CFC.sqrt_def`, `CFC.abs_def`, `CFC.log_def`); they are all `rfl`.
+
+**`Scalar`**: `cfc_nnreal_eq_real`, `cfcₙ_nnreal_eq_real`, `cfc_real_eq_complex`,
+`cfcₙ_real_eq_complex`. The reverse directions (`cfc_real_eq_nnreal`, `cfc_complex_eq_real`)
+carry non-syntactic hypotheses and are deliberately *not* tagged.
+
+**`Unital`**: `cfcₙ_eq_cfc`.
+
+**`Compose`**: `cfc_comp'`, `cfcₙ_comp'` (head symbol `cfc`/`cfcₙ`; these are the fallbacks used
+by step 2), `cfc_comp_pow`, `cfc_comp_smul`, `cfc_comp_const_mul`, `cfc_comp_star`,
+`cfc_comp_neg`, `cfc_comp_polynomial`, `cfcₙ_comp_smul`, `cfcₙ_comp_const_mul`,
+`cfcₙ_comp_star`, `cfcₙ_comp_neg`.
+
+## 10. Errors, tracing and limits
+
+The tactic fails with a descriptive error when
+
+* neither `R` nor `a` was given and none could be inferred from the goal;
+* no continuous functional calculus instance exists for the requested mode;
+* the goal has no argument of type `A` to pull on;
+* `pull` fails on every candidate argument, in which case the error names the first expression
+  it got stuck on and its head symbol.
+
+`set_option trace.Tactic.cfc_pull true` reports, in a nested tree: the mode chosen and the
+predicate found; for each subexpression, the candidate lemmas retrieved from the index, which
+were rejected and why (ring mismatch, instance synthesis failure, pattern mismatch, recursive
+failure); which hypotheses were filled from the cache and which became side goals; and the
+conversions applied.
+
+## 11. Deliberate non-goals and future work
+
+* **Choosing the best scalar ring automatically.** The tactic converts each subterm to the
+  requested ring as soon as it is produced, which can convert twice where once would do (e.g.
+  `a⁺ - a⁻` at `ℂ` converts each summand rather than the difference). A later iteration could
+  run an inference pass first to pick, for each node, the largest ring that works.
+* **Side-goal ergonomics.** Grouping `ContinuousOn` goals into a single conjunction, or naming
+  goal groups so they can be addressed with `case ... => fun_prop`.
+* **Building `ContinuousOn` proofs during the traversal** rather than deferring them.
+* **Lemmas whose holes appear under binders** (`cfc_sum`, `cfc_apply_pi`); these need a
+  dependent congruence and are rejected at tagging time for now.
+* **Relations other than binary ones**, and `cfc_pull ... at h`.
