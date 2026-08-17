@@ -10,7 +10,7 @@ public import Mathlib.Analysis.SpecialFunctions.ContinuousFunctionalCalculus.Pos
 public import Mathlib.Analysis.CStarAlgebra.ContinuousFunctionalCalculus.Isometric
 import Mathlib.Analysis.CStarAlgebra.ContinuousFunctionalCalculus.Commute
 import Mathlib.Analysis.SpecialFunctions.ContinuousFunctionalCalculus.Rpow.Isometric
-public import Mathlib.Tactic.CFCPull.Attr
+public import Mathlib.Tactic.CFCPull
 
 
 /-!
@@ -129,8 +129,7 @@ lemma abs_of_nonpos (a : A) (ha : a ≤ 0 := by cfc_tac) : abs a = -a := by
 
 lemma abs_eq_cfcₙ_norm (a : A) (ha : IsSelfAdjoint a := by cfc_tac) :
     abs a = cfcₙ (‖·‖) a := by
-  conv_lhs =>
-    rw [abs, ha.star_eq, sqrt_eq_real_sqrt .., ← cfcₙ_id' ℝ a, ← cfcₙ_mul .., ← cfcₙ_comp' ..]
+  conv_lhs => rw [abs, ha.star_eq]; cfc_pull ℝ a
   simp [← sq, Real.sqrt_sq_eq_abs]
 
 protected lemma posPart_add_negPart (a : A) (ha : IsSelfAdjoint a := by cfc_tac) :
@@ -196,7 +195,7 @@ variable (𝕜) in
 lemma abs_eq_cfcₙ_coe_norm (a : A) (ha : p a := by cfc_tac) :
     abs a = cfcₙ (fun z : 𝕜 ↦ (‖z‖ : 𝕜)) a := by
   rw [abs, sqrt_eq_iff _ _ (hb := cfcₙ_norm_nonneg _ _), ← cfcₙ_mul ..]
-  conv_rhs => rw [← cfcₙ_id' 𝕜 a, ← cfcₙ_star, ← cfcₙ_mul ..]
+  conv_rhs => cfc_pull 𝕜 a
   simp [RCLike.conj_mul, sq]
 
 lemma _root_.cfcₙ_comp_norm (f : 𝕜 → 𝕜) (a : A) (ha : p a := by cfc_tac)

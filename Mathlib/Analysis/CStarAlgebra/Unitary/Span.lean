@@ -8,6 +8,7 @@ module
 public import Mathlib.Analysis.CStarAlgebra.ContinuousFunctionalCalculus.Order
 public import Mathlib.Analysis.CStarAlgebra.ContinuousFunctionalCalculus.Unitary
 public import Mathlib.Analysis.Normed.Module.Normalize
+public import Mathlib.Tactic.CFCPull
 
 /-! # Unitary elements span C⋆-algebras
 
@@ -38,13 +39,11 @@ lemma IsSelfAdjoint.self_add_I_smul_cfcSqrt_sub_sq_mem_unitary (a : A) (ha : IsS
   obtain (_ | _) := subsingleton_or_nontrivial A
   · simp [Subsingleton.elim (a + I • CFC.sqrt (1 - a ^ 2)) 1, one_mem (unitary A)]
   have key : a + I • CFC.sqrt (1 - a ^ 2) = cfc (fun x : ℂ ↦ x.re + I * √(1 - x.re ^ 2)) a := by
-    rw [CFC.sqrt_eq_real_sqrt (1 - a ^ 2) ?nonneg]
-    case nonneg =>
-      rwa [sub_nonneg, ← CStarAlgebra.norm_le_one_iff_of_nonneg (a ^ 2), sq, ha.norm_mul_self,
+    cfc_pull +defer ℂ a
+    · exact cfc_congr fun x hx ↦ by
+        rw [← SpectrumRestricts.real_iff.mp ha.spectrumRestricts _ hx]
+    · rwa [sub_nonneg, ← CStarAlgebra.norm_le_one_iff_of_nonneg (a ^ 2), sq, ha.norm_mul_self,
         sq_le_one_iff₀ (by positivity)]
-    rw [cfc_add .., cfc_const_mul .., ← cfc_real_eq_complex (fun x ↦ x) ha, cfc_id' ℝ a,
-      ← cfc_real_eq_complex (fun x ↦ √(1 - x ^ 2)) ha, cfcₙ_eq_cfc, cfc_comp' (√·) (1 - · ^ 2) a,
-      cfc_sub .., cfc_pow .., cfc_const_one .., cfc_id' ..]
   rw [key, cfc_unitary_iff ..]
   intro x hx
   rw [← starRingEnd_apply, ← Complex.normSq_eq_conj_mul_self,

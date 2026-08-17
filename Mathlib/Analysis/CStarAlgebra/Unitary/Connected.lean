@@ -10,6 +10,7 @@ public import Mathlib.Analysis.CStarAlgebra.ContinuousFunctionalCalculus.Order
 public import Mathlib.Analysis.CStarAlgebra.Exponential
 public import Mathlib.Analysis.SpecialFunctions.Complex.Circle
 public import Mathlib.Analysis.SpecialFunctions.ContinuousFunctionalCalculus.ExpLog.Basic
+public import Mathlib.Tactic.CFCPull
 
 /-! # The unitary group in a unital C⋆-algebra is locally path connected
 
@@ -67,7 +68,7 @@ lemma Unitary.two_mul_one_sub_le_norm_sub_one_sq {u : A} (hu : u ∈ unitary A)
   rw [← Real.sqrt_le_left (by positivity)]
   have := spectrum.subset_circle_of_unitary hu hz
   simp only [mem_sphere_iff_norm, sub_zero] at this
-  rw [← cfc_id' ℂ u, ← cfc_one ℂ u, ← cfc_sub ..]
+  conv in u - 1 => cfc_pull ℂ u
   convert! norm_apply_le_norm_cfc (fun z ↦ z - 1) u hz
   simpa using congr(Real.sqrt $(norm_sub_one_sq_eq_of_norm_eq_one this)).symm
 
@@ -76,7 +77,7 @@ lemma Unitary.norm_sub_one_sq_eq {u : A} (hu : u ∈ unitary A) {x : ℝ}
     ‖u - 1‖ ^ 2 = 2 * (1 - x) := by
   obtain (_ | _) := subsingleton_or_nontrivial A
   · exfalso; apply hz.nonempty.of_image.ne_empty; simp
-  rw [← cfc_id' ℂ u, ← cfc_one ℂ u, ← cfc_sub ..]
+  conv in u - 1 => cfc_pull ℂ u
   have h_eqOn : (spectrum ℂ u).EqOn (fun z ↦ ‖z - 1‖ ^ 2) (fun z ↦ 2 * (1 - z.re)) :=
     Complex.norm_sub_one_sq_eqOn_sphere.mono <| spectrum.subset_circle_of_unitary (𝕜 := ℂ) hu
   have h₂ : IsGreatest ((fun z ↦ 2 * (1 - z.re)) '' (spectrum ℂ u)) (2 * (1 - x)) := by
