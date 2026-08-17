@@ -1,0 +1,552 @@
+/-
+Copyright (c) 2026 Jireh Loreaux. All rights reserved.
+Released under Apache 2.0 license as described in the file LICENSE.
+Authors: Jireh Loreaux
+-/
+module
+
+public import Mathlib.Tactic.CFCPull.Attr
+
+/-!
+# The core of the `cfc_pull` tactic
+
+Given a scalar ring `R`, an element `a : A`, and a unitality flag (jointly called a *mode*), the
+function `pull` takes an expression `e : A` and produces a function `f : R → R` together with a
+proof of `e = cfc f a` (or `e = cfcₙ f a`), plus a list of side goals that the proof depends on.
+
+The recursion is bottom-up: `pull` returns a `Result` containing the proof outright rather than
+threading output metavariables through the traversal. All matching happens at reducible
+transparency.
+
+See `Mathlib/Tactic/CFCPull/Spec.md` for the specification, and `Design.md` for a guide to this
+file.
+-/
+
+public meta section
+
+namespace Mathlib.Tactic.CFCPull
+
+open Lean Meta
+
+/-! ### Configuration, modes and the monad -/
+
+/-- Configuration for the `cfc_pull` tactic. -/
+structure Config where
+  /-- Prefer the unital calculus `cfc`. When `true` (the default) the tactic uses `cfc` if the
+  algebra carries a unital continuous functional calculus and silently falls back to `cfcₙ`
+  otherwise; when `false` it always produces `cfcₙ`. -/
+  unital : Bool := true
+  /-- Attempt to discharge the side goals with the standard auto-param tactics `cfc_tac`,
+  `cfc_cont_tac` and `cfc_zero_tac`. -/
+  discharge : Bool := false
+  /-- The maximum recursion depth. -/
+  maxDepth : Nat := 48
+  deriving Inhabited
+
+/-- Which continuous functional calculus we are producing: a scalar ring, and whether the
+calculus is the unital one. -/
+structure Mode where
+  /-- The scalar ring. -/
+  ring : Expr
+  /-- `true` for `cfc`, `false` for `cfcₙ`. -/
+  unital : Bool
+  deriving Inhabited
+
+instance : ToMessageData Mode where
+  toMessageData m := m!"{if m.unital then "cfc" else "cfcₙ"} over {m.ring}"
+
+/-- What is known about the continuous functional calculus at a given mode. -/
+structure PredicateInfo where
+  /-- The mode this information is about. -/
+  mode : Mode
+  /-- The predicate `p : A → Prop` of the calculus. -/
+  pred : Expr
+  /-- A proof of `p a`, created lazily on first use and shared by every lemma application at
+  this mode. -/
+  proof? : Option Expr := none
+  deriving Inhabited
+
+/-- The read-only state of a `cfc_pull` run. -/
+structure Context where
+  /-- The user's configuration. -/
+  cfg : Config
+  /-- The element `a : A` that everything is pulled towards. -/
+  elem : Expr
+  /-- The algebra `A`. -/
+  alg : Expr
+  /-- The mode requested by the user. -/
+  target : Mode
+  /-- The `@[cfc_pull]` database, read once at the start of the run. -/
+  lemmas : Lemmas
+  /-- The current recursion depth. -/
+  depth : Nat := 0
+
+/-- The mutable state of a `cfc_pull` run. -/
+structure State where
+  /-- Goals that the user will have to discharge, in creation order. -/
+  sideGoals : Array MVarId := #[]
+  /-- Cached information about the calculus at each mode encountered so far. -/
+  predicates : Array PredicateInfo := #[]
+
+/-- The monad in which `cfc_pull` runs. -/
+abbrev PullM := ReaderT Context <| StateRefT State MetaM
+
+/-- The outcome of pulling a single expression. -/
+structure Result where
+  /-- The mode of `rhs`. -/
+  mode : Mode
+  /-- The function `f : R → R`. -/
+  fn : Expr
+  /-- The right-hand side `cfc f a`, kept verbatim so that its instance arguments are those of
+  the lemma that produced it. -/
+  rhs : Expr
+  /-- A proof of `e = rhs`, where `e` is the expression that was pulled. -/
+  proof : Expr
+  deriving Inhabited
+
+instance : ExceptToTraceResult Exception Result where
+  toTraceResult
+    | .error _ => .error
+    | .ok _ => .success
+
+/-! ### Small utilities -/
+
+/-- Run `x`, undoing its metavariable assignments and its side goals if it fails.
+
+Only the metavariable context and the `PullM` state are rolled back, not the whole `MetaM` state:
+this keeps the trace messages emitted by failed candidates, which is the point of tracing. -/
+def observing? {α : Type} (x : PullM α) : PullM (Option α) := do
+  let mctx ← getMCtx
+  let s ← get
+  try
+    return some (← x)
+  catch ex =>
+    setMCtx mctx
+    set s
+    trace[Tactic.cfc_pull] "✗ {ex.toMessageData}"
+    return none
+
+/-- Increase the recursion depth, failing if the configured maximum is reached. -/
+def withIncDepth {α : Type} (x : PullM α) : PullM α := do
+  let ctx ← read
+  if ctx.depth ≥ ctx.cfg.maxDepth then
+    throwError "`cfc_pull` reached the maximum recursion depth of {ctx.cfg.maxDepth}; either the \
+      expression is too deeply nested, or the `@[cfc_pull]` lemma set is looping"
+  withReader (fun c => { c with depth := c.depth + 1 }) x
+
+/-- Strip an `autoParam` wrapper, so that a deferred goal displays as the user expects. -/
+def stripAutoParam (e : Expr) : Expr :=
+  if e.isAppOfArity ``autoParam 2 then e.appFn!.appArg! else e
+
+/-- Register a new side goal of the given type. -/
+def newSideGoal (type : Expr) : PullM Expr := do
+  let g ← mkFreshExprSyntheticOpaqueMVar type (tag := `cfc_pull)
+  modify fun s => { s with sideGoals := s.sideGoals.push g.mvarId! }
+  return g
+
+/-- Build the application `C args ..`, synthesising the instance arguments of the class `C`.
+
+Unlike `mkAppM`, this fills in instance arguments that come *after* the last explicit argument,
+which is exactly the shape of `ContinuousFunctionalCalculus R A p [CommSemiring R] ⋯`. -/
+def mkClassApp (clsName : Name) (args : Array Expr) : MetaM Expr := do
+  let info ← getConstInfo clsName
+  let lvls ← info.levelParams.mapM fun _ => mkFreshLevelMVar
+  let (mvars, bis, _) ←
+    forallMetaTelescope (info.type.instantiateLevelParams info.levelParams lvls)
+  let mut j := 0
+  for i in [0:mvars.size] do
+    if bis[i]! == .default && j < args.size then
+      unless ← isDefEq mvars[i]! args[j]! do
+        throwError "`{clsName}` does not accept `{args[j]!}` as its argument {j}"
+      j := j + 1
+  for i in [0:mvars.size] do
+    if bis[i]!.isInstImplicit then
+      unless ← mvars[i]!.mvarId!.isAssigned do
+        let inst ← synthInstance (← instantiateMVars (← mvars[i]!.mvarId!.getType))
+        unless ← isDefEq mvars[i]! inst do
+          throwError "`{clsName}`: could not use the synthesised instance `{inst}`"
+  return mkAppN (.const clsName lvls) mvars
+
+/-- The index in the cache of the information about the calculus at `mode`, if known. -/
+def findPredicateIdx (mode : Mode) : PullM (Option Nat) := do
+  let s ← get
+  for _h : i in [0:s.predicates.size] do
+    let pi := s.predicates[i]
+    if pi.mode.unital == mode.unital then
+      if ← withReducible <| isDefEq pi.mode.ring mode.ring then
+        return some i
+  return none
+
+/-- The predicate `p : A → Prop` of the continuous functional calculus at `mode`, obtained by
+synthesising the relevant instance and reading off its `outParam`. Fails if there is no such
+calculus. -/
+def getPredicate (mode : Mode) : PullM Expr := do
+  if let some i ← findPredicateIdx mode then
+    return (← get).predicates[i]!.pred
+  let ctx ← read
+  let p ← mkFreshExprMVar (← mkArrow ctx.alg (.sort .zero))
+  let clsName := if mode.unital then cfcClassName else cfcₙClassName
+  let cls ← try mkClassApp clsName #[mode.ring, ctx.alg, p]
+    catch _ =>
+      throwError "`cfc_pull` could not even state `{clsName} {mode.ring} {ctx.alg} _`; the \
+        algebra is missing some of the structure the continuous functional calculus needs"
+  let _ ← synthInstance cls
+  let pred ← instantiateMVars p
+  if pred.hasExprMVar then
+    throwError "`cfc_pull` could not determine the predicate of the continuous functional \
+      calculus for {mode}"
+  trace[Tactic.cfc_pull] "predicate for {mode} is {pred}"
+  modify fun s => { s with predicates := s.predicates.push { mode, pred } }
+  return pred
+
+/-- A proof of `p a` for the calculus at `mode`. The metavariable is created on first use and
+then shared, so a run leaves at most one predicate side goal per mode. -/
+def getPredicateProof (mode : Mode) : PullM Expr := do
+  let _ ← getPredicate mode
+  let some i ← findPredicateIdx mode | throwError "internal error: missing predicate cache entry"
+  let pi := (← get).predicates[i]!
+  if let some prf := pi.proof? then return prf
+  let prf ← newSideGoal (mkApp pi.pred (← read).elem)
+  modify fun s => { s with predicates := s.predicates.set! i { pi with proof? := some prf } }
+  return prf
+
+/-- Synthesise every instance-implicit argument of an instantiated lemma that is still
+unassigned. Failure here is the mechanism by which lemmas are restricted to the rings and
+algebras they apply to. -/
+def synthesizeInstances (declName : Name) (mvars : Array Expr) (bis : Array BinderInfo) :
+    MetaM Unit := do
+  for _h : i in [0:mvars.size] do
+    if bis[i]!.isInstImplicit then
+      let mvarId := mvars[i]!.mvarId!
+      unless ← mvarId.isAssigned do
+        let type ← instantiateMVars (← mvarId.getType)
+        if type.hasExprMVar then
+          throwError "`{declName}`: the instance argument `{type}` is not determined"
+        let .some inst ← trySynthInstance type
+          | throwError "`{declName}` does not apply here: no instance `{type}`"
+        unless ← isDefEq mvars[i]! inst do
+          throwError "`{declName}`: the synthesised instance `{inst}` does not match"
+
+/-- Deal with the hypotheses of an instantiated lemma: those that are the predicate `p a` at
+`mode` are filled with the shared proof, the rest become side goals. -/
+def collectHypotheses (declName : Name) (mvars : Array Expr) (bis : Array BinderInfo)
+    (mode : Mode) : PullM Unit := do
+  let ctx ← read
+  for _h : i in [0:mvars.size] do
+    let mvarId := mvars[i]!.mvarId!
+    if ← mvarId.isAssigned then continue
+    if bis[i]!.isInstImplicit then continue
+    let type := stripAutoParam (← instantiateMVars (← mvarId.getType))
+    unless ← isProp type do
+      throwError "`{declName}` does not apply here: the argument of type `{type}` could not be \
+        determined"
+    let pred ← getPredicate mode
+    if ← withReducible <| isDefEq type (mkApp pred ctx.elem) then
+      mvarId.assign (← getPredicateProof mode)
+      trace[Tactic.cfc_pull] "`{declName}`: filled `{type}` from the shared predicate proof"
+    else
+      mvarId.assign (← newSideGoal type)
+      trace[Tactic.cfc_pull] "`{declName}`: deferred `{type}`"
+
+/-- Test whether an expression is an unassigned metavariable, i.e. a variable of the lemma being
+applied. -/
+def isLemmaVar (e : Expr) : MetaM Bool := do
+  return e.isMVar && !(← e.mvarId!.isAssigned)
+
+/-- `mkCongrN F #[h₀, …, hₙ]` with `hᵢ : xᵢ = yᵢ` builds a proof of
+`F x₀ ⋯ xₙ = F y₀ ⋯ yₙ`. `F` must be non-dependent. -/
+def mkCongrN (F : Expr) (hs : Array Expr) : MetaM Expr := do
+  hs.foldlM (init := ← mkEqRefl F) mkCongr
+
+/-! ### The scalar conversion graph -/
+
+/-- Whether a result obtained at ring key `src` is already usable at `tgt`. A lemma polymorphic
+in its scalar ring (`RingKey.any`) is instantiated directly at the target ring, so no conversion
+is needed. -/
+def RingKey.isUsableAt (src tgt : RingKey) : Bool :=
+  src == .any || src == tgt
+
+/-- A shortest sequence of tagged `Scalar` lemmas converting a `cfc[ₙ]` over `src` into one over
+`tgt`, or `none` if there is no such sequence. -/
+def scalarPath (src tgt : RingKey) (unital : Bool) : PullM (Option (Array ScalarLemma)) := do
+  if src.isUsableAt tgt then return some #[]
+  let edges := (← read).lemmas.scalar.filter (·.unital == unital)
+  -- breadth-first search; the graph has a handful of nodes, so this is cheap
+  let mut frontier : Array (RingKey × Array ScalarLemma) := #[(src, #[])]
+  let mut seen : Array RingKey := #[src]
+  for _ in [0:edges.size + 1] do
+    let mut next := #[]
+    for (node, path) in frontier do
+      for e in edges do
+        unless e.src.isUsableAt node do continue
+        if seen.contains e.tgt then continue
+        let path := path.push e
+        if e.tgt.isUsableAt tgt then return some path
+        seen := seen.push e.tgt
+        next := next.push (e.tgt, path)
+    if next.isEmpty then return none
+    frontier := next
+  return none
+
+/-! ### Applying tagged lemmas -/
+
+/-- Apply a transition lemma, i.e. an equation `cfc f a = cfc' g a` between two applications of
+the calculus to the *same* element. Used for both the `Scalar` and the `Unital` categories.
+
+`srcOnLhs` says which side of the equation should be matched against `res.rhs`. -/
+def applyTransition (declName : Name) (symm srcOnLhs : Bool) (res : Result) : PullM Result := do
+  let ctx ← read
+  let (mvars, bis, lhs, rhs, proof) ← instantiateLemma declName symm
+  let (srcSide, tgtSide) := if srcOnLhs then (lhs, rhs) else (rhs, lhs)
+  let some cs := CFCApp.match? srcSide | throwError "`{declName}` is not a transition lemma"
+  unless ← isDefEq cs.A ctx.alg do throwError "`{declName}`: wrong algebra"
+  unless ← isDefEq cs.R res.mode.ring do throwError "`{declName}`: wrong scalar ring"
+  unless ← isDefEq cs.p (← getPredicate res.mode) do throwError "`{declName}`: wrong predicate"
+  unless ← isDefEq cs.a ctx.elem do throwError "`{declName}`: wrong element"
+  unless ← isDefEq cs.f res.fn do throwError "`{declName}`: could not match the function"
+  synthesizeInstances declName mvars bis
+  let tgtSide ← instantiateMVars tgtSide
+  let some ct := CFCApp.match? tgtSide | throwError "`{declName}` is not a transition lemma"
+  let fn ← Core.betaReduce ct.f
+  let newRhs := CFCApp.withFn tgtSide fn
+  let step ← if srcOnLhs then pure proof else mkEqSymm proof
+  let step ← mkExpectedTypeHint step (← mkEq res.rhs newRhs)
+  collectHypotheses declName mvars bis res.mode
+  return { mode := { ring := ct.R, unital := ct.unital }, fn, rhs := newRhs,
+           proof := ← mkEqTrans res.proof step }
+
+/-- Convert a result to the requested mode: first the unitality, then the scalar ring.
+
+Doing the unitality first keeps the `f 0 = 0` side goal of `cfcₙ_eq_cfc` about the smallest
+possible function, and implements the rule that a `cfcₙ` at the right element should become a
+`cfc` immediately when the unital calculus was requested. -/
+def convert (res : Result) (want : Mode) : PullM Result := do
+  let mut res := res
+  if res.mode.unital != want.unital then
+    let mut done := false
+    for l in (← read).lemmas.unital do
+      unless ← l.ring.matchesRing res.mode.ring do continue
+      -- to reach the unital calculus we start from the non-unital side, and conversely
+      let srcOnLhs := if want.unital then l.nonUnitalOnLhs else !l.nonUnitalOnLhs
+      if let some r ← observing? (applyTransition l.declName l.symm srcOnLhs res) then
+        res := r; done := true; break
+    unless done do
+      throwError "`cfc_pull` could not convert {res.mode} into {want}"
+  unless ← withReducible <| isDefEq res.mode.ring want.ring do
+    let some path ← scalarPath (.ofExpr res.mode.ring) (.ofExpr want.ring) want.unital
+      | throwError "`cfc_pull` has no way to convert a {res.mode} into a {want}"
+    for l in path do
+      res ← applyTransition l.declName l.symm true res
+    unless ← withReducible <| isDefEq res.mode.ring want.ring do
+      throwError "`cfc_pull` converted to {res.mode}, but {want} was requested"
+  return res
+
+/-- Apply a `Pull` lemma to `e`, recursing on the holes with `rec`.
+
+The steps, in order: fix the algebra, ring, predicate and element of the lemma; replace the holes
+of its algebraic side by fresh metavariables and match the result against `e`; recurse on what
+the holes matched; assign the functions so obtained; synthesise instances; and assemble the
+proof. Assigning the element *before* matching is what makes lemmas whose algebraic side does
+not mention it (such as `cfc_const_one`) apply only at the right element. -/
+def applyPullLemma (l : PullLemma) (e : Expr) (want : Mode)
+    (rec : Expr → Mode → PullM Result) : PullM Result := do
+  let ctx ← read
+  let (mvars, bis, lhs, rhs, proof) ← instantiateLemma l.declName l.symm
+  let (cfcSide, algSide) := if l.cfcOnLhs then (lhs, rhs) else (rhs, lhs)
+  let some c := CFCApp.match? cfcSide | throwError "`{l.declName}` is not a pull lemma"
+  unless ← isDefEq c.A ctx.alg do throwError "`{l.declName}`: wrong algebra"
+  if l.ring == .any then
+    unless ← isDefEq c.R want.ring do throwError "`{l.declName}`: wrong scalar ring"
+  let mode : Mode := { ring := ← instantiateMVars c.R, unital := c.unital }
+  unless ← isDefEq c.p (← getPredicate mode) do throwError "`{l.declName}`: wrong predicate"
+  unless ← isDefEq c.a ctx.elem do throwError "`{l.declName}`: wrong element"
+  -- Replace the holes by fresh metavariables and match.  `pat` is kept unassigned so that the
+  -- holes can be abstracted again below, after unification has filled in everything else.
+  let (pat, holes, phs) ←
+    abstractHoles (isHoleFor c isLemmaVar) (mkFreshExprMVar ctx.alg) algSide
+  unless ← withReducible <| isDefEq pat e do
+    throwError "`{l.declName}` does not match: `{pat}` ≠ `{e}`"
+  -- Recurse on the subterms the holes matched.
+  let mut subs := #[]
+  let mut results := #[]
+  for h in phs do
+    let sub ← instantiateMVars h
+    if sub.isMVar then
+      throwError "`{l.declName}`: the hole `{h}` was not determined by matching"
+    subs := subs.push sub
+    results := results.push (← rec sub mode)
+  for _h : i in [0:holes.size] do
+    let some hc := CFCApp.match? holes[i]! | throwError "internal error: bad hole"
+    unless ← isDefEq hc.f results[i]!.fn do
+      throwError "`{l.declName}`: could not use the function found for `{subs[i]!}`"
+  synthesizeInstances l.declName mvars bis
+  -- Assemble the proof.  `e = ⟨algebraic side⟩` by congruence, then the lemma itself.
+  let algSide' ← instantiateMVars algSide
+  let cfcSide' ← instantiateMVars cfcSide
+  let some cc := CFCApp.match? cfcSide' | throwError "internal error: lost the `cfc` side"
+  let fn ← Core.betaReduce cc.f
+  let newRhs := CFCApp.withFn cfcSide' fn
+  let hcongr ← withLocalDeclsD (phs.map fun _ => (`x, fun _ => pure ctx.alg)) fun xs => do
+    let body ← instantiateMVars <| pat.replace fun s => match s with
+      | .mvar m => (phs.findIdx? (·.mvarId! == m)).map (xs[·]!)
+      | _ => none
+    let F ← mkLambdaFVars xs body
+    mkCongrN F (results.map (·.proof))
+  let hcongr ← mkExpectedTypeHint hcongr (← mkEq e algSide')
+  let lemProof ← if l.cfcOnLhs then mkEqSymm proof else pure proof
+  let total ← mkEqTrans hcongr lemProof
+  let total ← mkExpectedTypeHint total (← mkEq e newRhs)
+  collectHypotheses l.declName mvars bis mode
+  return { mode, fn, rhs := newRhs, proof := total }
+
+/-- Apply a `Compose` lemma to `e = cfc g b`, rewriting it to `cfc g' b'` with `b'` a subterm of
+`b`. Unlike a `Pull` lemma, the element is *not* fixed in advance: it is whatever the structured
+element of the lemma matches. -/
+def applyComposeLemma (l : ComposeLemma) (e : Expr) (mode : Mode) : PullM (Expr × Expr) := do
+  let ctx ← read
+  let (mvars, bis, lhs, rhs, proof) ← instantiateLemma l.declName l.symm
+  let (srcSide, tgtSide) := if l.srcOnLhs then (lhs, rhs) else (rhs, lhs)
+  let some cs := CFCApp.match? srcSide | throwError "`{l.declName}` is not a composition lemma"
+  unless ← isDefEq cs.A ctx.alg do throwError "`{l.declName}`: wrong algebra"
+  if l.ring == .any then
+    unless ← isDefEq cs.R mode.ring do throwError "`{l.declName}`: wrong scalar ring"
+  unless ← isDefEq cs.p (← getPredicate mode) do throwError "`{l.declName}`: wrong predicate"
+  unless ← withReducible <| isDefEq srcSide e do
+    throwError "`{l.declName}` does not match `{e}`"
+  synthesizeInstances l.declName mvars bis
+  let tgtSide ← instantiateMVars tgtSide
+  let some ct := CFCApp.match? tgtSide | throwError "`{l.declName}` is not a composition lemma"
+  let newE := CFCApp.withFn tgtSide (← Core.betaReduce ct.f)
+  let step ← if l.srcOnLhs then pure proof else mkEqSymm proof
+  let step ← mkExpectedTypeHint step (← mkEq e newE)
+  collectHypotheses l.declName mvars bis mode
+  return (newE, step)
+
+/-- Convert an `IdLemma` into the `PullLemma` that `applyPullLemma` expects; an identity lemma is
+just a pull lemma whose algebraic side is the element and which therefore has no holes. -/
+def IdLemma.toPullLemma (l : IdLemma) : PullLemma where
+  declName := l.declName
+  symm := l.symm
+  prio := 1000
+  ring := l.ring
+  unital := l.unital
+  cfcOnLhs := l.cfcOnLhs
+  numHoles := 0
+
+/-! ### The recursion -/
+
+mutual
+
+/-- Pull `e` towards `cfc f a` at the mode `want`. See `Spec.md` §6.2. -/
+partial def pull (e : Expr) (want : Mode) : PullM Result := withIncDepth do
+  withTraceNode `Tactic.cfc_pull
+      (fun r => return m!"{if r.toOption.isSome then checkEmoji else crossEmoji} \
+        pull {e} into a {want}") do
+    let ctx ← read
+    -- 1. the element itself
+    if ← withReducible <| isDefEq e ctx.elem then
+      for l in ctx.lemmas.id do
+        let r ← observing? do
+          convert (← applyPullLemma l.toPullLemma e want pull) want
+        if let some r := r then return r
+    -- 2. an application of the calculus
+    if let some c := CFCApp.match? e then
+      let r ← observing? do convert (← pullExisting e c want) want
+      if let some r := r then return r
+    -- 3. tagged pull lemmas
+    let candidates ← pullCandidates e want
+    trace[Tactic.cfc_pull] "candidates for {e}: {candidates.map (·.declName)}"
+    for l in candidates do
+      let r ← observing? do convert (← applyPullLemma l e want pull) want
+      if let some r := r then return r
+    throwError "`cfc_pull` got stuck on `{e}`{indentD m!"(head symbol: \
+      {e.getAppFn.constName?.getD `_}, target: {want})"}"
+
+/-- Handle `e = cfc g b`: either `b` is the element we are pulling towards, or we are looking at
+a composition. -/
+partial def pullExisting (e : Expr) (c : CFCApp) (want : Mode) : PullM Result := do
+  let ctx ← read
+  let mode : Mode := { ring := c.R, unital := c.unital }
+  if ← withReducible <| isDefEq c.a ctx.elem then
+    return { mode, fn := c.f, rhs := e, proof := ← mkEqRefl e }
+  -- A composition.  First look for a tagged lemma matching the head of the inner element.
+  let innerHead := c.a.getAppFn.constName?
+  for l in ctx.lemmas.compose do
+    unless l.unital == c.unital do continue
+    unless ← l.ring.matchesRing c.R do continue
+    unless some l.innerHead == innerHead do continue
+    let r ← observing? do
+      let (newE, step) ← applyComposeLemma l e mode
+      let res ← pull newE want
+      return { res with proof := ← mkEqTrans step res.proof }
+    if let some r := r then return r
+  -- Otherwise, pull the inner element first and try again; this is what makes `cfc_comp'`
+  -- applicable.
+  let inner ← pull c.a mode
+  if inner.rhs == c.a then
+    throwError "`cfc_pull` made no progress on the inner element `{c.a}`"
+  let newE := CFCApp.withElem e inner.rhs
+  let step ← withLocalDeclD `y ctx.alg fun y => do
+    let F ← mkLambdaFVars #[y] (CFCApp.withElem e y)
+    mkCongrArg F inner.proof
+  let step ← mkExpectedTypeHint step (← mkEq e newE)
+  let res ← pull newE want
+  return { res with proof := ← mkEqTrans step res.proof }
+
+/-- The `Pull` lemmas that could apply to `e`, best first.
+
+The ordering is: lemmas usable at the requested mode without any conversion, then those needing
+only a change of unitality, then those needing a scalar conversion (shortest first). Ties are
+broken by attribute priority and then by specificity, measured by the number of holes: a lemma
+such as `cfc_pow_id`, whose algebraic side is `a ^ n`, is preferred over `cfc_pow`, whose
+algebraic side is `cfc f a ^ n`, because it generates fewer side goals. -/
+partial def pullCandidates (e : Expr) (want : Mode) : PullM (Array PullLemma) := do
+  let ctx ← read
+  let cands ← ctx.lemmas.pull.getMatch e
+  let wantKey := RingKey.ofExpr want.ring
+  let mut scored : Array (Nat × Nat × Nat × PullLemma) := #[]
+  for l in cands do
+    let ringCost ←
+      if l.ring.isUsableAt wantKey then pure 0
+      else match ← scalarPath l.ring wantKey want.unital with
+        | some path => pure (path.size + 1)
+        | none => pure 0xffff
+    if ringCost == 0xffff then
+      trace[Tactic.cfc_pull] "skipping `{l.declName}`: no conversion from {l.ring} to {wantKey}"
+      continue
+    let unitalCost := if l.unital == want.unital then 0 else 1
+    scored := scored.push (ringCost + unitalCost, 1000000 - l.prio, l.numHoles, l)
+  return (scored.qsort fun (a₁, a₂, a₃, _) (b₁, b₂, b₃, _) =>
+    a₁ < b₁ || (a₁ == b₁ && (a₂ < b₂ || (a₂ == b₂ && a₃ < b₃)))).map (·.2.2.2)
+
+end
+
+/-! ### Entry point -/
+
+/-- Determine the mode to work in: the scalar ring `R` as requested, and the unital calculus if
+the configuration asks for it and the algebra supports it. Also returns the predicate. -/
+def mkMode (cfg : Config) (R alg : Expr) : MetaM Mode := do
+  if cfg.unital then
+    let ok ←
+      try
+        let p ← mkFreshExprMVar (← mkArrow alg (.sort .zero))
+        let cls ← mkClassApp cfcClassName #[R, alg, p]
+        pure (← trySynthInstance cls).toOption.isSome
+      catch _ => pure false
+    if ok then return { ring := R, unital := true }
+  return { ring := R, unital := false }
+
+/-- Run the core of `cfc_pull` on `e`: returns the rewritten expression, a proof that `e` equals
+it, and the side goals that proof depends on. -/
+def runPull (cfg : Config) (R elem e : Expr) : MetaM (Expr × Expr × Array MVarId) := do
+  let alg ← inferType elem
+  unless ← isDefEq (← inferType e) alg do
+    throwError "`cfc_pull`: `{e}` does not live in the algebra `{alg}`"
+  let target ← mkMode cfg R alg
+  let lemmas ← getLemmas
+  let ctx : Context := { cfg, elem, alg, target, lemmas }
+  let (res, st) ← ((pull e target).run ctx).run {}
+  let goals ← st.sideGoals.filterM fun g => return !(← g.isAssigned)
+  return (← instantiateMVars res.rhs, ← instantiateMVars res.proof, goals)
+
+end Mathlib.Tactic.CFCPull

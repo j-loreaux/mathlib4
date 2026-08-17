@@ -54,6 +54,12 @@ def cfcName : Name := `cfc
 /-- The name of the non-unital continuous functional calculus. -/
 def cfcₙName : Name := `cfcₙ
 
+/-- The name of the class carrying the unital continuous functional calculus. -/
+def cfcClassName : Name := `ContinuousFunctionalCalculus
+
+/-- The name of the class carrying the non-unital continuous functional calculus. -/
+def cfcₙClassName : Name := `NonUnitalContinuousFunctionalCalculus
+
 /-- The pieces of an application `cfc f a` or `cfcₙ f a`.
 
 Both constants take the scalar ring, the algebra and the predicate as their first three
@@ -93,6 +99,11 @@ The other arguments (including the instances) are reused verbatim. -/
 def CFCApp.withFn (e : Expr) (f : Expr) : Expr :=
   let args := e.getAppArgs
   mkAppN e.getAppFn (args.set! (args.size - 2) f)
+
+/-- Rebuild a `cfc`/`cfcₙ` application from a `CFCApp`, replacing the element argument. -/
+def CFCApp.withElem (e : Expr) (a : Expr) : Expr :=
+  let args := e.getAppArgs
+  mkAppN e.getAppFn (args.set! (args.size - 1) a)
 
 /-! ### Scalar rings -/
 
@@ -138,6 +149,8 @@ structure IdLemma where
   ring : RingKey
   /-- Whether the lemma is about `cfc` (`true`) or `cfcₙ` (`false`). -/
   unital : Bool
+  /-- Whether the `cfc` side is the left-hand side (after `symm` has been taken into account). -/
+  cfcOnLhs : Bool
   deriving Inhabited, BEq, Repr
 
 /-- A lemma with `cfc`/`cfcₙ` on one side and an algebraic expression on the other, e.g.
@@ -361,7 +374,7 @@ where
   /-- Classify a lemma with a `cfc` application on exactly one side. -/
   mkPullEntry (c : CFCApp) (alg : Expr) (cfcOnLhs : Bool) : MetaM Entry := do
     if ← withNewMCtxDepth <| isDefEq alg c.a then
-      return .id { declName, symm, ring := .ofExpr c.R, unital := c.unital }
+      return .id { declName, symm, ring := .ofExpr c.R, unital := c.unital, cfcOnLhs }
     let isVar (e : Expr) : MetaM Bool := return e.isMVar
     let (pat, holes, _) ← abstractHoles (isHoleFor c isVar) (mkFreshExprMVar c.A) alg
     for h in holes do
