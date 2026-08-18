@@ -53,10 +53,9 @@ example (ha : p a) :
     star a * a = cfc (fun x : R ↦ star x * x) a := by
   cfc_pull R a
 
-/-- With `+defer` the continuity hypotheses are left to the user instead of being discharged. -/
-example (ha : p a) :
-    star a * a = cfc (fun x : R ↦ star x * x) a := by
-  cfc_pull +defer R a <;> fun_prop
+/- Note that `+defer` would make no difference here: it does not switch the discharging off, it
+only changes what happens to the goals the discharging could not close, and here there are none.
+See the `MessySideGoals` section below for where it does matter. -/
 
 example (ha : p a) (hf : ContinuousOn f (spectrum R a)) (hg : ContinuousOn g (spectrum R a)) :
     star (cfc f a) + cfc g a + a = cfc (fun x ↦ star (f x) + g x + x) a := by

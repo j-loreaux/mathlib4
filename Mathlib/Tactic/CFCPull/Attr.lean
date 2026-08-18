@@ -282,20 +282,35 @@ def getLemmas : CoreM Lemmas := return cfcPullExt.getState (← getEnv)
 used, both in left-to-right traversal order.
 
 Subterms containing loose bound variables are never treated as holes; a hole underneath a binder
-is fine as long as it does not mention the bound variable. -/
-def abstractHoles (isHole : Expr → MetaM Bool) (mk : MetaM Expr) (e : Expr) :
+is fine as long as it does not mention the bound variable, because the caller goes on to abstract
+the placeholders into a function and a hole mentioning a bound variable is not a term of the
+algebra at all.
+
+The traversal is written out rather than delegated to `Meta.transform` for two reasons, both to
+do with that loose-bound-variable test: `Meta.transform` instantiates binders with local
+hypotheses before visiting a body, so the test would never fire and a hole could capture a
+variable that does not exist outside the traversal; and it memoises on structural equality, which
+would give two structurally equal holes the same placeholder. -/
+partial def abstractHoles (isHole : Expr → MetaM Bool) (mk : MetaM Expr) (e : Expr) :
     MetaM (Expr × Array Expr × Array Expr) := do
-  let holes ← IO.mkRef (#[] : Array Expr)
-  let phs ← IO.mkRef (#[] : Array Expr)
-  let pat ← Meta.transform e (pre := fun s => do
-    if s.hasLooseBVars then return .continue
-    unless ← isHole s do return .continue
-    let ph ← mk
-    holes.modify (·.push s)
-    phs.modify (·.push ph)
-    -- `.done` stops the traversal here, which is what makes the holes maximal
-    return .done ph)
-  return (pat, ← holes.get, ← phs.get)
+  let (pat, (holes, phs)) ← (go e).run (#[], #[])
+  return (pat, holes, phs)
+where
+  /-- The traversal. It stops at the outermost hole, which is what makes the holes maximal. -/
+  go (e : Expr) : StateT (Array Expr × Array Expr) MetaM Expr := do
+    if !e.hasLooseBVars then
+      if ← isHole e then
+        let ph ← mk
+        modify fun (hs, ps) => (hs.push e, ps.push ph)
+        return ph
+    match e with
+    | .app f x => return .app (← go f) (← go x)
+    | .lam n t b bi => return .lam n (← go t) (← go b) bi
+    | .forallE n t b bi => return .forallE n (← go t) (← go b) bi
+    | .letE n t v b nd => return .letE n (← go t) (← go v) (← go b) nd
+    | .mdata d b => return .mdata d (← go b)
+    | .proj s i b => return .proj s i (← go b)
+    | _ => return e
 
 /-- Test whether `s` is a hole relative to the `cfc` application `ref`: an application of the
 same calculus, at the same ring and element, whose function argument is a variable in the sense

@@ -298,8 +298,9 @@ def collectHypotheses (declName : Name) (mvars : Array Expr) (bis : Array Binder
 
 /-- Test whether an expression is an unassigned metavariable, i.e. a variable of the lemma being
 applied. -/
-def isLemmaVar (e : Expr) : MetaM Bool := do
-  return e.isMVar && !(← e.mvarId!.isAssigned)
+def isLemmaVar : Expr → MetaM Bool
+  | .mvar m => return !(← m.isAssigned)
+  | _ => return false
 
 /-- `mkCongrN F #[h₀, …, hₙ]` with `hᵢ : xᵢ = yᵢ` builds a proof of
 `F x₀ ⋯ xₙ = F y₀ ⋯ yₙ`. `F` must be non-dependent. -/
