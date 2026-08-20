@@ -460,7 +460,7 @@ Examples of lemmas in each of the five categories the attribute recognises:
 syntax (name := cfcPullAttr) "cfc_pull" (" ←" <|> " <-")? (ppSpace prio)? : attr
 
 initialize registerBuiltinAttribute {
-  name := ``cfcPullAttr
+  name := `cfcPullAttr
   descr := "lemma used by the `cfc_pull` tactic"
   add := fun declName stx kind => MetaM.run' do
     let symm := !stx[1].isNone
