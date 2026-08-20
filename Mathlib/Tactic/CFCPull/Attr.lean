@@ -94,12 +94,16 @@ def CFCApp.match? (e : Expr) : Option CFCApp := do
   return { unital, R := args[0]!, A := args[1]!, p := args[2]!,
            f := args[args.size - 2]!, a := args[args.size - 1]! }
 
+-- Note: this lemma doesn't actually use a `CFCApp`, that's confusing, and probably brittle?
+-- Also, it's only used in two places, and could maybe be inlined.
 /-- Rebuild a `cfc`/`cfcₙ` application from a `CFCApp`, replacing the function argument.
 The other arguments (including the instances) are reused verbatim. -/
 def CFCApp.withFn (e : Expr) (f : Expr) : Expr :=
   let args := e.getAppArgs
   mkAppN e.getAppFn (args.set! (args.size - 2) f)
 
+-- Note: this lemma doesn't actually use a `CFCApp`, that's confusing, and probably brittle?
+-- Also, it's only used in two places, and could maybe be inlined.
 /-- Rebuild a `cfc`/`cfcₙ` application from a `CFCApp`, replacing the element argument. -/
 def CFCApp.withElem (e : Expr) (a : Expr) : Expr :=
   let args := e.getAppArgs
@@ -124,6 +128,8 @@ instance : ToMessageData RingKey where
     | .const n => m!"{n}"
     | .any => m!"_"
 
+-- This is probably bad as it does absolutely no checks on if `n` is a type, and it has no failure
+-- modes. Are checks put in place later?
 /-- The `RingKey` of an expression denoting a scalar ring. -/
 def RingKey.ofExpr (R : Expr) : RingKey :=
   match R.getAppFn with
@@ -257,6 +263,7 @@ structure Lemmas where
   compose : Array ComposeLemma := #[]
   deriving Inhabited
 
+-- should we also make it possible to remove lemmas from the database?
 /-- Add an entry to the database. -/
 def Lemmas.addEntry (s : Lemmas) : Entry → Lemmas
   | .id l => { s with id := s.id.push l }
@@ -272,6 +279,7 @@ initialize cfcPullExt : SimpleScopedEnvExtension Entry Lemmas ←
     addEntry := Lemmas.addEntry
   }
 
+-- does this really need to be it's own `def`? Can't we simply inline it?
 /-- The `@[cfc_pull]` lemmas available in the current environment. -/
 def getLemmas : CoreM Lemmas := return cfcPullExt.getState (← getEnv)
 
@@ -354,6 +362,8 @@ register_option cfcPull.warnBoundHoles : Bool := {
 
 /-! ### Classification -/
 
+-- it feels like there should already be a tool to do this? I doubt we should need to create a
+-- bespoke one.
 /-- Instantiate a tagged lemma: returns its metavariables, their binder infos, the two sides of
 the equation (swapped if the lemma is used right-to-left) and a proof of `lhs = rhs`. -/
 def instantiateLemma (declName : Name) (symm : Bool) :
@@ -380,12 +390,16 @@ def mkEntry (declName : Name) (symm : Bool) (prio : Nat) : MetaM Entry := do
   | none, some c => mkPullEntry c lhs (cfcOnLhs := false)
   | some cl, some cr => do
     let sameRing ← withNewMCtxDepth <| isDefEq cl.R cr.R
+    -- if the lhs and rhs are over different scalar rings, then we ensure they both have the
+    -- same unitality and enter this as a scalar lemma
     if !sameRing then
       unless cl.unital == cr.unital do
         throwError "@[cfc_pull] failed: `{declName}` changes both the scalar ring and the\n\
           unitality of the functional calculus; such lemmas are not supported."
       return .scalar
         { declName, symm, src := .ofExpr cl.R, tgt := .ofExpr cr.R, unital := cl.unital }
+    -- if the lhs and rhs are over the same scalar rings, but have different unitality, we
+    -- enter this as a unital lemma
     if cl.unital != cr.unital then
       return .unital { declName, symm, ring := .ofExpr cl.R, nonUnitalOnLhs := !cl.unital }
     -- same ring, same unitality: this must be a composition lemma
@@ -446,10 +460,11 @@ Examples of lemmas in each of the five categories the attribute recognises:
 syntax (name := cfcPullAttr) "cfc_pull" (" ←" <|> " <-")? (ppSpace prio)? : attr
 
 initialize registerBuiltinAttribute {
-  name := `cfcPullAttr
+  name := ``cfcPullAttr
   descr := "lemma used by the `cfc_pull` tactic"
   add := fun declName stx kind => MetaM.run' do
     let symm := !stx[1].isNone
+    -- is this `liftM` actually necessary?
     let prio ← liftM <| getAttrParamOptPrio stx[2]
     cfcPullExt.add (← mkEntry declName symm prio) kind
 }
