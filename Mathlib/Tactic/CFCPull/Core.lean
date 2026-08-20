@@ -15,8 +15,26 @@ function `pull` takes an expression `e : A` and produces a function `f : R → R
 proof of `e = cfc f a` (or `e = cfcₙ f a`), plus a list of side goals that the proof depends on.
 
 The recursion is bottom-up: `pull` returns a `Result` containing the proof outright rather than
-threading output metavariables through the traversal. All matching happens at reducible
-transparency.
+threading output metavariables through the traversal.
+
+## Transparency
+
+Every test of the form "does this lemma apply to the expression in front of us" runs at
+reducible transparency, as in `rw`: the pattern match itself, but also the algebra, the scalar
+ring, the predicate and the element that guard it, since a lemma admitted by one of those and
+rejected by the match has cost a backtrack for nothing. There are two deliberate exceptions,
+both at default transparency:
+
+* **Instance synthesis** — `mkClassApp` and `synthesizeInstances` assign instance arguments from
+  the results of `synthInstance`, which produces terms defeq to the expected type only at
+  `.instances` transparency or beyond. Reducible here would reject valid instances.
+* **Typing** — `runPull` and `Frontend.targetPositions` ask "is this expression an element of
+  the algebra?", which is a typing question rather than a match, and is answered the way the
+  elaborator would answer it.
+
+`Attr.lean` uses default transparency throughout, but never compares against a user expression:
+its `isDefEq` calls all run under `withNewMCtxDepth` and relate two parts of a single tagged
+lemma's statement to each other.
 
 See `Mathlib/Tactic/CFCPull/Spec.md` for the specification, and `Design.md` for a guide to this
 file.
@@ -150,6 +168,9 @@ def withIncDepth {α : Type} (x : PullM α) : PullM α := do
 def stripAutoParam (e : Expr) : Expr :=
   if e.isAutoParam then e.appFn!.appArg! else e
 
+-- TODO: we should *never* actually run into `p a` goals, right? So this kind of goal should
+-- be removed? We could leave it around instead, and then when we improve the classification
+-- system in `ofType`, we could account for them there.
 /-- What kind of hypothesis a side goal came from. This drives both the name the goal is given
 (so that `case cfc_pull.continuity => fun_prop` addresses all of them at once) and the auto-param
 tactic used to try to discharge it. -/
@@ -164,6 +185,7 @@ inductive SideGoalKind where
   | other
   deriving Inhabited, BEq, Repr
 
+-- TODO: this classification system is too inaccurate.
 /-- Classify a side goal by its statement. `ContinuousOn` is matched by name because this file
 deliberately does not import the analysis library. -/
 def SideGoalKind.ofType (type : Expr) : SideGoalKind :=
@@ -191,6 +213,7 @@ def newSideGoal (type : Expr) (kind : SideGoalKind) : PullM Expr := do
   modify fun s => { s with sideGoals := s.sideGoals.push g.mvarId! }
   return g
 
+-- it really feels like there should already be a way to do this easily.
 /-- Build the application `C args ..`, synthesising the instance arguments of the class `C`.
 
 Neither `mkAppM` nor `mkAppOptM` will do: both stop at the last explicit argument, whereas the
@@ -218,9 +241,8 @@ def mkClassApp (clsName : Name) (args : Array Expr) : MetaM Expr := do
 /-- The index in the cache of the information about the calculus at `mode`, if known. -/
 def findPredicateIdx (mode : Mode) : PullM (Option Nat) := do
   for (pi, i) in (← get).predicates.zipIdx do
-    if pi.mode.unital == mode.unital then
-      if ← withReducible <| isDefEq pi.mode.ring mode.ring then
-        return some i
+    if pi.mode.unital == mode.unital && (← withReducible <| isDefEq pi.mode.ring mode.ring) then
+      return some i
   return none
 
 /-- The predicate `p : A → Prop` of the continuous functional calculus at `mode`, obtained by
@@ -302,11 +324,6 @@ def isLemmaVar : Expr → MetaM Bool
   | .mvar m => return !(← m.isAssigned)
   | _ => return false
 
-/-- `mkCongrN F #[h₀, …, hₙ]` with `hᵢ : xᵢ = yᵢ` builds a proof of
-`F x₀ ⋯ xₙ = F y₀ ⋯ yₙ`. `F` must be non-dependent. -/
-def mkCongrN (F : Expr) (hs : Array Expr) : MetaM Expr := do
-  hs.foldlM (init := ← mkEqRefl F) mkCongr
-
 /-! ### The scalar conversion graph -/
 
 /-- Whether a result obtained at ring key `src` is already usable at `tgt`. A lemma polymorphic
@@ -352,14 +369,19 @@ def rewriteWithCFCLemma (declName : Name) (symm srcOnLhs : Bool) (e : Expr) (mod
   let (mvars, bis, lhs, rhs, proof) ← instantiateLemma declName symm
   let (srcSide, tgtSide) := if srcOnLhs then (lhs, rhs) else (rhs, lhs)
   let some cs := CFCApp.match? srcSide | throwError "`{declName}` is not a `cfc`-to-`cfc` lemma"
-  unless ← isDefEq cs.A ctx.alg do throwError "`{declName}`: wrong algebra"
-  unless ← isDefEq cs.p (← getPredicate mode) do throwError "`{declName}`: wrong predicate"
+  -- Everything that decides whether this lemma applies *here* is a match against the user's
+  -- expression, so it runs at reducible transparency. `synthesizeInstances` below is the
+  -- exception; see the note on transparency in the module docstring.
+  unless ← withReducible <| isDefEq cs.A ctx.alg do
+    throwError "`{declName}`: wrong algebra"
+  unless ← withReducible <| isDefEq cs.p (← getPredicate mode) do
+    throwError "`{declName}`: wrong predicate"
   unless ← withReducible <| isDefEq srcSide e do
     throwError "`{declName}` does not match `{e}`"
   synthesizeInstances declName mvars bis
   let tgtSide ← instantiateMVars tgtSide
   let some ct := CFCApp.match? tgtSide | throwError "`{declName}` is not a `cfc`-to-`cfc` lemma"
-  let newE := CFCApp.withFn tgtSide (← Core.betaReduce ct.f)
+  let newE := ct.withFn (← Core.betaReduce ct.f)
   let step ← if srcOnLhs then pure proof else mkEqSymm proof
   let step ← mkExpectedTypeHint step (← mkEq e newE)
   collectHypotheses declName mvars bis mode
@@ -411,12 +433,16 @@ def applyPullLemma (l : PullLemma) (e : Expr) (want : Mode)
   let (mvars, bis, lhs, rhs, proof) ← instantiateLemma l.declName l.symm
   let (cfcSide, algSide) := if l.cfcOnLhs then (lhs, rhs) else (rhs, lhs)
   let some c := CFCApp.match? cfcSide | throwError "`{l.declName}` is not a pull lemma"
-  unless ← isDefEq c.A ctx.alg do throwError "`{l.declName}`: wrong algebra"
+  unless ← withReducible <| isDefEq c.A ctx.alg do
+    throwError "`{l.declName}`: wrong algebra"
   if l.ring == .any then
-    unless ← isDefEq c.R want.ring do throwError "`{l.declName}`: wrong scalar ring"
+    unless ← withReducible <| isDefEq c.R want.ring do
+      throwError "`{l.declName}`: wrong scalar ring"
   let mode : Mode := { ring := ← instantiateMVars c.R, unital := c.unital }
-  unless ← isDefEq c.p (← getPredicate mode) do throwError "`{l.declName}`: wrong predicate"
-  unless ← isDefEq c.a ctx.elem do throwError "`{l.declName}`: wrong element"
+  unless ← withReducible <| isDefEq c.p (← getPredicate mode) do
+    throwError "`{l.declName}`: wrong predicate"
+  unless ← withReducible <| isDefEq c.a ctx.elem do
+    throwError "`{l.declName}`: wrong element"
   -- Replace the holes by fresh metavariables and match.  `pat` is kept unassigned so that the
   -- holes can be abstracted again below, after unification has filled in everything else.
   let (pat, holes, phs) ←
@@ -432,7 +458,7 @@ def applyPullLemma (l : PullLemma) (e : Expr) (want : Mode)
     results := results.push (← rec sub mode)
   for (hole, res) in holes.zip results do
     let some hc := CFCApp.match? hole | throwError "internal error: bad hole"
-    unless ← isDefEq hc.f res.fn do
+    unless ← withReducible <| isDefEq hc.f res.fn do
       throwError "`{l.declName}`: could not use the function found for `{hole}`"
   synthesizeInstances l.declName mvars bis
   -- Assemble the proof.  `e = ⟨algebraic side⟩` by congruence, then the lemma itself.
@@ -440,13 +466,15 @@ def applyPullLemma (l : PullLemma) (e : Expr) (want : Mode)
   let cfcSide' ← instantiateMVars cfcSide
   let some cc := CFCApp.match? cfcSide' | throwError "internal error: lost the `cfc` side"
   let fn ← Core.betaReduce cc.f
-  let newRhs := CFCApp.withFn cfcSide' fn
+  let newRhs := cc.withFn fn
   let hcongr ← withLocalDeclsD (phs.map fun _ => (`x, fun _ => pure ctx.alg)) fun xs => do
     let body ← instantiateMVars <| pat.replace fun s => match s with
       | .mvar m => (phs.findIdx? (·.mvarId! == m)).map (xs[·]!)
       | _ => none
     let F ← mkLambdaFVars xs body
-    mkCongrN F (results.map (·.proof))
+    -- `mkCongr` one hole at a time: from `hᵢ : xᵢ = yᵢ`, folding it over `rfl : F = F` gives
+    -- `F x₀ ⋯ xₙ = F y₀ ⋯ yₙ`. `F` is non-dependent by construction.
+    (results.map (·.proof)).foldlM (init := ← mkEqRefl F) fun h h' => mkCongr h h'
   let hcongr ← mkExpectedTypeHint hcongr (← mkEq e algSide')
   let lemProof ← if l.cfcOnLhs then mkEqSymm proof else pure proof
   let total ← mkEqTrans hcongr lemProof
@@ -469,17 +497,20 @@ def applyLooseLemma (l : PullLemma) (e : Expr) (want : Mode) : PullM (Expr × Ex
   let (mvars, bis, lhs, rhs, proof) ← instantiateLemma l.declName l.symm
   let (cfcSide, algSide) := if l.cfcOnLhs then (lhs, rhs) else (rhs, lhs)
   let some c := CFCApp.match? cfcSide | throwError "`{l.declName}` is not a pull lemma"
-  unless ← isDefEq c.A ctx.alg do throwError "`{l.declName}`: wrong algebra"
+  unless ← withReducible <| isDefEq c.A ctx.alg do
+    throwError "`{l.declName}`: wrong algebra"
   if l.ring == .any then
-    unless ← isDefEq c.R want.ring do throwError "`{l.declName}`: wrong scalar ring"
+    unless ← withReducible <| isDefEq c.R want.ring do
+      throwError "`{l.declName}`: wrong scalar ring"
   let mode : Mode := { ring := ← instantiateMVars c.R, unital := c.unital }
-  unless ← isDefEq c.p (← getPredicate mode) do throwError "`{l.declName}`: wrong predicate"
+  unless ← withReducible <| isDefEq c.p (← getPredicate mode) do
+    throwError "`{l.declName}`: wrong predicate"
   unless ← withReducible <| isDefEq algSide e do
     throwError "`{l.declName}` does not match `{e}`"
   synthesizeInstances l.declName mvars bis
   let cfcSide ← instantiateMVars cfcSide
   let some cc := CFCApp.match? cfcSide | throwError "internal error: lost the `cfc` side"
-  let newE := CFCApp.withFn cfcSide (← Core.betaReduce cc.f)
+  let newE := cc.withFn (← Core.betaReduce cc.f)
   if newE == e then throwError "`{l.declName}` made no progress"
   let step ← if l.cfcOnLhs then mkEqSymm proof else pure proof
   let step ← mkExpectedTypeHint step (← mkEq e newE)
@@ -496,6 +527,36 @@ def IdLemma.toPullLemma (l : IdLemma) : PullLemma where
   unital := l.unital
   cfcOnLhs := l.cfcOnLhs
   numHoles := 0
+
+/-! ### Ordering candidate lemmas -/
+
+/-- How far a `Pull` lemma is from applying at the mode we want: the key `pullCandidates` sorts
+its candidates on, best (least) first.
+
+The fields are compared lexicographically rather than combined into a number, because they are
+not commensurable: one scalar conversion is not "as much cost" as one change of unitality, and
+neither is a quantity of the same kind as an attribute priority. -/
+structure Cost where
+  /-- The number of `Scalar` lemmas that have to be composed to get from the lemma's scalar ring
+  to the requested one; `0` when the lemma is usable at the requested ring outright. -/
+  conversions : Nat
+  /-- Whether a change of unitality is needed on top of that. -/
+  changesUnitality : Bool
+  /-- The lemma's `@[cfc_pull]` priority. Higher priority is *better*, so unlike the other
+  fields this one is compared in reverse. -/
+  prio : Nat
+  /-- The number of holes on the lemma's algebraic side. Each hole is a recursive call, and
+  each recursive call can leave side goals behind, so fewer is better: `cfc_pow_id`, whose
+  algebraic side is `a ^ n`, beats `cfc_pow`, whose algebraic side is `cfc f a ^ n`. -/
+  holes : Nat
+  deriving Inhabited, Repr
+
+instance : Ord Cost where
+  compare a b :=
+    compare a.conversions b.conversions
+      |>.then (compare a.changesUnitality b.changesUnitality)
+      |>.then (compare b.prio a.prio)
+      |>.then (compare a.holes b.holes)
 
 /-! ### The recursion -/
 
@@ -514,7 +575,7 @@ partial def pull (e : Expr) (want : Mode) : PullM Result := withIncDepth do
         if let some r := r then return r
     -- 2. an application of the calculus
     if let some c := CFCApp.match? e then
-      let r ← observing? do convert (← pullExisting e c want) want
+      let r ← observing? do convert (← pullExisting c want) want
       if let some r := r then return r
     -- 3. tagged pull lemmas
     let candidates ← pullCandidates e want
@@ -536,8 +597,9 @@ partial def pull (e : Expr) (want : Mode) : PullM Result := withIncDepth do
 
 /-- Handle `e = cfc g b`: either `b` is the element we are pulling towards, or we are looking at
 a composition. -/
-partial def pullExisting (e : Expr) (c : CFCApp) (want : Mode) : PullM Result := do
+partial def pullExisting (c : CFCApp) (want : Mode) : PullM Result := do
   let ctx ← read
+  let e := c.e
   let mode : Mode := { ring := c.R, unital := c.unital }
   if ← withReducible <| isDefEq c.a ctx.elem then
     return { mode, fn := c.f, rhs := e, proof := ← mkEqRefl e }
@@ -569,39 +631,38 @@ partial def pullExisting (e : Expr) (c : CFCApp) (want : Mode) : PullM Result :=
   let inner ← pull c.a mode
   if inner.rhs == c.a then
     throwError "`cfc_pull` made no progress on the inner element `{c.a}`"
-  let newE := CFCApp.withElem e inner.rhs
+  let newE := c.withElem inner.rhs
   let step ← withLocalDeclD `y ctx.alg fun y => do
-    let F ← mkLambdaFVars #[y] (CFCApp.withElem e y)
+    let F ← mkLambdaFVars #[y] (c.withElem y)
     mkCongrArg F inner.proof
   let step ← mkExpectedTypeHint step (← mkEq e newE)
   let res ← pull newE want
   return { res with proof := ← mkEqTrans step res.proof }
 
-/-- The `Pull` lemmas that could apply to `e`, best first.
+/-- The `Pull` lemmas that could apply to `e`, best first, ordered by `Cost`: lemmas usable at
+the requested scalar ring first and then by the length of the conversion chain, within that
+those already at the requested unitality, then by attribute priority, then by number of holes.
 
-The ordering is: lemmas usable at the requested mode without any conversion, then those needing
-only a change of unitality, then those needing a scalar conversion (shortest first). Ties are
-broken by attribute priority and then by specificity, measured by the number of holes: a lemma
-such as `cfc_pow_id`, whose algebraic side is `a ^ n`, is preferred over `cfc_pow`, whose
-algebraic side is `cfc f a ^ n`, because it generates fewer side goals. -/
+Lemmas whose scalar ring the conversion graph cannot reach from the requested one are dropped
+rather than ranked last; there is no point offering a candidate that is certain to fail. -/
 partial def pullCandidates (e : Expr) (want : Mode) : PullM (Array PullLemma) := do
   let ctx ← read
   let cands ← ctx.lemmas.pull.getMatch e
   let wantKey := RingKey.ofExpr want.ring
-  let mut scored : Array (Nat × Nat × Nat × PullLemma) := #[]
+  let mut scored : Array (Cost × PullLemma) := #[]
   for l in cands do
-    let ringCost ←
-      if l.ring.isUsableAt wantKey then pure 0
-      else match ← scalarPath l.ring wantKey want.unital with
-        | some path => pure (path.size + 1)
-        | none => pure 0xffff
-    if ringCost == 0xffff then
+    -- `none` here means the lemma's ring is unreachable, not that it is expensive.
+    let conversions? ←
+      if l.ring.isUsableAt wantKey then pure (some 0)
+      else pure ((← scalarPath l.ring wantKey want.unital).map (·.size))
+    match conversions? with
+    | none =>
       trace[Tactic.cfc_pull] "skipping `{l.declName}`: no conversion from {l.ring} to {wantKey}"
-      continue
-    let unitalCost := if l.unital == want.unital then 0 else 1
-    scored := scored.push (ringCost + unitalCost, 1000000 - l.prio, l.numHoles, l)
-  return (scored.qsort fun (a₁, a₂, a₃, _) (b₁, b₂, b₃, _) =>
-    a₁ < b₁ || (a₁ == b₁ && (a₂ < b₂ || (a₂ == b₂ && a₃ < b₃)))).map (·.2.2.2)
+    | some conversions =>
+      scored := scored.push
+        ({ conversions, changesUnitality := l.unital != want.unital, prio := l.prio,
+            holes := l.numHoles }, l)
+  return (scored.qsort fun a b => compare a.1 b.1 |>.isLT).map (·.2)
 
 end
 

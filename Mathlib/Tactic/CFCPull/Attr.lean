@@ -60,12 +60,19 @@ def cfcClassName : Name := `ContinuousFunctionalCalculus
 /-- The name of the class carrying the non-unital continuous functional calculus. -/
 def cfcₙClassName : Name := `NonUnitalContinuousFunctionalCalculus
 
-/-- The pieces of an application `cfc f a` or `cfcₙ f a`.
+/-- An application `cfc f a` or `cfcₙ f a`, together with the pieces of it that we care about.
 
 Both constants take the scalar ring, the algebra and the predicate as their first three
 arguments and the function and the element as their last two, which is all this structure
-records; the instance arguments in between are irrelevant to us. -/
+records; the instance arguments in between are irrelevant to us, and are the reason the
+application itself is kept in the `e` field rather than reassembled on demand.
+
+The only way to build a `CFCApp` is `CFCApp.match?`, so a value of this type is a witness that
+`e` really is an application of the calculus with at least five arguments. `withFn` and
+`withElem` rely on that. -/
 structure CFCApp where
+  /-- The application itself, `cfc f a` or `cfcₙ f a`. -/
+  e : Expr
   /-- `true` for `cfc`, `false` for `cfcₙ`. -/
   unital : Bool
   /-- The scalar ring `R`. -/
@@ -91,23 +98,20 @@ def CFCApp.match? (e : Expr) : Option CFCApp := do
   -- `cfc` has 15 arguments and `cfcₙ` has 18; we only rely on the positions of the first three
   -- and the last two, so that the matcher survives a change to the instance arguments.
   guard <| args.size ≥ 5
-  return { unital, R := args[0]!, A := args[1]!, p := args[2]!,
+  return { e, unital, R := args[0]!, A := args[1]!, p := args[2]!,
            f := args[args.size - 2]!, a := args[args.size - 1]! }
 
--- Note: this lemma doesn't actually use a `CFCApp`, that's confusing, and probably brittle?
--- Also, it's only used in two places, and could maybe be inlined.
-/-- Rebuild a `cfc`/`cfcₙ` application from a `CFCApp`, replacing the function argument.
-The other arguments (including the instances) are reused verbatim. -/
-def CFCApp.withFn (e : Expr) (f : Expr) : Expr :=
-  let args := e.getAppArgs
-  mkAppN e.getAppFn (args.set! (args.size - 2) f)
+/-- Rebuild the application, replacing the function argument. The other arguments (including the
+instances) are reused verbatim, which is the whole point: re-elaborating them would mean
+re-running instance synthesis. -/
+def CFCApp.withFn (c : CFCApp) (f : Expr) : Expr :=
+  let args := c.e.getAppArgs
+  mkAppN c.e.getAppFn (args.set! (args.size - 2) f)
 
--- Note: this lemma doesn't actually use a `CFCApp`, that's confusing, and probably brittle?
--- Also, it's only used in two places, and could maybe be inlined.
-/-- Rebuild a `cfc`/`cfcₙ` application from a `CFCApp`, replacing the element argument. -/
-def CFCApp.withElem (e : Expr) (a : Expr) : Expr :=
-  let args := e.getAppArgs
-  mkAppN e.getAppFn (args.set! (args.size - 1) a)
+/-- Rebuild the application, replacing the element argument. -/
+def CFCApp.withElem (c : CFCApp) (a : Expr) : Expr :=
+  let args := c.e.getAppArgs
+  mkAppN c.e.getAppFn (args.set! (args.size - 1) a)
 
 /-! ### Scalar rings -/
 
@@ -128,9 +132,9 @@ instance : ToMessageData RingKey where
     | .const n => m!"{n}"
     | .any => m!"_"
 
--- This is probably bad as it does absolutely no checks on if `n` is a type, and it has no failure
--- modes. Are checks put in place later?
-/-- The `RingKey` of an expression denoting a scalar ring. -/
+/-- The `RingKey` of an expression denoting a scalar ring.
+
+This is only ever called on the `CFCApp.R` of after having matched with `CFCApp.match?` -/
 def RingKey.ofExpr (R : Expr) : RingKey :=
   match R.getAppFn with
   | .const n _ => .const n
@@ -263,7 +267,6 @@ structure Lemmas where
   compose : Array ComposeLemma := #[]
   deriving Inhabited
 
--- should we also make it possible to remove lemmas from the database?
 /-- Add an entry to the database. -/
 def Lemmas.addEntry (s : Lemmas) : Entry → Lemmas
   | .id l => { s with id := s.id.push l }
@@ -279,7 +282,6 @@ initialize cfcPullExt : SimpleScopedEnvExtension Entry Lemmas ←
     addEntry := Lemmas.addEntry
   }
 
--- does this really need to be it's own `def`? Can't we simply inline it?
 /-- The `@[cfc_pull]` lemmas available in the current environment. -/
 def getLemmas : CoreM Lemmas := return cfcPullExt.getState (← getEnv)
 
@@ -362,15 +364,13 @@ register_option cfcPull.warnBoundHoles : Bool := {
 
 /-! ### Classification -/
 
--- it feels like there should already be a tool to do this? I doubt we should need to create a
--- bespoke one.
 /-- Instantiate a tagged lemma: returns its metavariables, their binder infos, the two sides of
 the equation (swapped if the lemma is used right-to-left) and a proof of `lhs = rhs`. -/
 def instantiateLemma (declName : Name) (symm : Bool) :
     MetaM (Array Expr × Array BinderInfo × Expr × Expr × Expr) := do
   let c ← mkConstWithFreshMVarLevels declName
-  let (mvars, bis, type) ← forallMetaTelescope (← inferType c)
-  let some (_, lhs, rhs) := type.eq? |
+  let (mvars, bis, type) ← forallMetaTelescopeReducing (← inferType c)
+  let some (_, lhs, rhs) ← matchEq? type |
     throwError "`{declName}` is not an equation"
   let proof := mkAppN c mvars
   if symm then
@@ -460,12 +460,16 @@ Examples of lemmas in each of the five categories the attribute recognises:
 syntax (name := cfcPullAttr) "cfc_pull" (" ←" <|> " <-")? (ppSpace prio)? : attr
 
 initialize registerBuiltinAttribute {
+  -- The single backtick is required. Attributes live in a flat `Name`-keyed map which
+  -- `Lean.Elab.elabAttr` consults under `Name.mkSimple` of the *last component* of the syntax
+  -- node kind, so the key here must be the bare `cfcPullAttr`; the resolved name
+  -- `Mathlib.Tactic.CFCPull.cfcPullAttr` never matches, and every use of `@[cfc_pull]` then
+  -- fails with "Unknown attribute".
   name := `cfcPullAttr
   descr := "lemma used by the `cfc_pull` tactic"
   add := fun declName stx kind => MetaM.run' do
     let symm := !stx[1].isNone
-    -- is this `liftM` actually necessary?
-    let prio ← liftM <| getAttrParamOptPrio stx[2]
+    let prio ← getAttrParamOptPrio stx[2]
     cfcPullExt.add (← mkEntry declName symm prio) kind
 }
 

@@ -166,7 +166,9 @@ def cfcPullTarget (cfg : Config) (R elem : Expr) (goal : MVarId) : TacticM Unit 
     for _h : j in [0:positions.size] do
       body := body.set! positions[j]! xs[j]!
     let F ← mkLambdaFVars xs (mkAppN target.getAppFn body)
-    mkCongrN F proofs
+    -- `mkCongr` one position at a time: from `hᵢ : xᵢ = yᵢ`, folding it over `rfl : F = F`
+    -- gives `F x₀ ⋯ xₙ = F y₀ ⋯ yₙ`. `F` is non-dependent by construction.
+    proofs.foldlM (init := ← mkEqRefl F) fun h h' => mkCongr h h'
   let hcongr ← mkExpectedTypeHint hcongr (← mkEq target newTarget)
   let newGoal ← goal.replaceTargetEq newTarget hcongr
   let mut main := [newGoal]

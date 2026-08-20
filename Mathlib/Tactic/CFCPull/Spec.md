@@ -154,9 +154,10 @@ application.
 
 marks a lemma for use by the tactic. `←` uses the lemma right-to-left. Tagged lemmas must be
 equations `lhs = rhs` in which at least one side has `cfc` or `cfcₙ` as its head symbol. The
-attribute analyses the statement (under `forallTelescope`, so that instance hypotheses are in
-scope) and sorts it into one of **five** categories. (The draft had four; the `Id` category is
-split off from `Pull` because its algebra side has no head symbol to index on.)
+attribute analyses the statement (under `forallMetaTelescopeReducing`, so that the lemma's
+binders become the same metavariables the tactic will later unify against) and sorts it into one
+of **five** categories. (The draft had four; the `Id` category is split off from `Pull` because
+its algebra side has no head symbol to index on.)
 
 Write `E` for the `cfc`/`cfcₙ` **element** argument and `F` for its **function** argument.
 
