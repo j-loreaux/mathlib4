@@ -110,19 +110,27 @@ section ComplexScalars
 
 open Complex
 
-variable {A : Type*} [CStarAlgebra A]
+section NonUnital
+
+variable {A : Type*} [NonUnitalCStarAlgebra A]
 
 local notation "↑ₐ" => algebraMap ℂ A
 
+open CStarAlgebra
+
 theorem IsSelfAdjoint.spectralRadius_eq_nnnorm {a : A} (ha : IsSelfAdjoint a) :
     spectralRadius ℂ a = ‖a‖₊ := by
-  have hconst : Tendsto (fun _n : ℕ => (‖a‖₊ : ℝ≥0∞)) atTop _ := tendsto_const_nhds
+  -- TODO: once we have `ℕ+` powers in semigroups and Gelfand's formula is generalized to non-unital
+  -- algebras, then we can skip passing to the unitization here.
+  suffices spectralRadius ℂ (a : A⁺¹) = ‖(a : A⁺¹)‖₊ by simpa [Unitization.nnnorm_inr]
+  have hconst : Tendsto (fun _n : ℕ => (‖(a : A⁺¹)‖₊ : ℝ≥0∞)) atTop _ := tendsto_const_nhds
   refine tendsto_nhds_unique ?_ hconst
   convert!
-    (spectrum.pow_nnnorm_pow_one_div_tendsto_nhds_spectralRadius (a : A)).comp
+    (spectrum.pow_nnnorm_pow_one_div_tendsto_nhds_spectralRadius (a : A⁺¹)).comp
       (tendsto_pow_atTop_atTop_of_one_lt one_lt_two) using 1
   refine funext fun n => ?_
-  rw [Function.comp_apply, ha.nnnorm_pow_two_pow, ENNReal.coe_pow, ← rpow_natCast, ← rpow_mul]
+  rw [Function.comp_apply, (ha.inr ℂ).nnnorm_pow_two_pow, ENNReal.coe_pow, ← rpow_natCast,
+    ← rpow_mul]
   simp
 
 /-- In a C⋆-algebra, the spectral radius of a self-adjoint element is equal to its norm.
@@ -132,22 +140,28 @@ lemma IsSelfAdjoint.toReal_spectralRadius_complex_eq_norm {a : A} (ha : IsSelfAd
     (spectralRadius ℂ a).toReal = ‖a‖ := by
   simp [ha.spectralRadius_eq_nnnorm]
 
+open Unitization in
 theorem IsStarNormal.spectralRadius_eq_nnnorm (a : A) [IsStarNormal a] :
     spectralRadius ℂ a = ‖a‖₊ := by
+  -- TODO: once we have `ℕ+` powers in semigroups and Gelfand's formula is generalized to non-unital
+  -- algebras, then we can skip passing to the unitization here.
+  suffices spectralRadius ℂ (a : A⁺¹) = ‖(a : A⁺¹)‖₊ by simpa [Unitization.nnnorm_inr]
+  have : IsStarNormal (a : A⁺¹) := inferInstance
   refine (ENNReal.pow_right_strictMono two_ne_zero).injective ?_
   have heq :
-    (fun n : ℕ => (‖(a⋆ * a) ^ n‖₊ : ℝ≥0∞) ^ (1 / n : ℝ)) =
-      (fun x => x ^ 2) ∘ fun n : ℕ => (‖a ^ n‖₊ : ℝ≥0∞) ^ (1 / n : ℝ) := by
+    (fun n : ℕ => (‖((a⋆ * a) ^ n : A⁺¹)‖₊ : ℝ≥0∞) ^ (1 / n : ℝ)) =
+      (fun x => x ^ 2) ∘ fun n : ℕ => (‖(a ^ n : A⁺¹)‖₊ : ℝ≥0∞) ^ (1 / n : ℝ) := by
     funext n
     rw [Function.comp_apply, ← rpow_natCast, ← rpow_mul, mul_comm, rpow_mul, rpow_natCast, ←
-      coe_pow, sq, ← nnnorm_star_mul_self, Commute.mul_pow (star_comm_self' a), star_pow]
+      coe_pow, sq, ← nnnorm_star_mul_self, inr_star, Commute.mul_pow (star_comm_self' (a : A⁺¹)), star_pow]
   have h₂ :=
-    ((ENNReal.continuous_pow 2).tendsto (spectralRadius ℂ a)).comp
-      (spectrum.pow_nnnorm_pow_one_div_tendsto_nhds_spectralRadius a)
+    ((ENNReal.continuous_pow 2).tendsto (spectralRadius ℂ (a : A⁺¹))).comp
+      (spectrum.pow_nnnorm_pow_one_div_tendsto_nhds_spectralRadius (a : A⁺¹))
   rw [← heq] at h₂
-  convert! tendsto_nhds_unique h₂ (pow_nnnorm_pow_one_div_tendsto_nhds_spectralRadius (a⋆ * a))
-  rw [(IsSelfAdjoint.star_mul_self a).spectralRadius_eq_nnnorm, sq, nnnorm_star_mul_self, coe_mul]
-
+  convert! tendsto_nhds_unique h₂
+    (pow_nnnorm_pow_one_div_tendsto_nhds_spectralRadius (a⋆ * a : A⁺¹))
+  rw [inr_star, (IsSelfAdjoint.star_mul_self (a : A⁺¹)).spectralRadius_eq_nnnorm, sq,
+    nnnorm_star_mul_self, coe_mul]
 namespace CStarAlgebra
 
 theorem toReal_spectralRadius_star_mul_self_eq_norm_sq (a : A) :
@@ -168,6 +182,10 @@ theorem sqrt_toReal_spectralRadius_self_mul_star_eq_norm (a : A) :
   simp [toReal_spectralRadius_self_mul_star_eq_norm_sq]
 
 end CStarAlgebra
+
+end NonUnital
+
+variable {A : Type*} [CStarAlgebra A]
 
 /-- Any element of the spectrum of a selfadjoint is real. -/
 theorem IsSelfAdjoint.mem_spectrum_eq_re {a : A} (ha : IsSelfAdjoint a) {z : ℂ}
