@@ -84,6 +84,11 @@ conv ... => cfc_pull (config)? (R)? (a)?
   * `+defer` (default `false`). Return the side goals that could not be discharged instead of
     failing; see [§7](#7-side-goals).
   * `(maxDepth := n)` (default `48`), a recursion-depth guard.
+* **Discharger** (the `(disch := tac)` clause of `simp` and `fun_prop`, and written after the
+  configuration items as it is there). A tactic to try on side goals nothing else closed; see
+  [§7](#7-side-goals). It is not an `optConfig` item, because its value is a tactic rather than
+  a term, so it is a separate syntax node and `elabCFCPullConfig` omits the corresponding field.
+  The default does nothing.
 
 ### Behaviour on the goal
 
@@ -314,6 +319,12 @@ goal. The tactic handles them as follows.
   calculus API itself would use for a hypothesis of that kind (`cfc_cont_tac` for continuity,
   `cfc_zero_tac` for `f 0 = 0`, and for the rest `cfc_predicate`/`cfcₙ_predicate` followed by
   `cfc_tac` — in that order, because `cfc_tac` never fails).
+* On a `cfc_pull.side` goal that survives all of that, the `(disch := tac)` tactic is tried
+  last. These are the hypotheses peculiar to an individual lemma, the only ones the calculus API
+  has nothing to offer for; the other three kinds already have a tactic written for them, and
+  running a user tactic after it would mostly mean running `fun_prop` twice on the same
+  `ContinuousOn` goal. The discharger is run as a separate attempt rather than as another branch
+  of the `first` above, because that `first` ends in `cfc_tac`, which never fails.
 * Anything still open is **an error**, listing the goals. With `+defer` they are returned and
   added to the goal list after the main goal instead.
 

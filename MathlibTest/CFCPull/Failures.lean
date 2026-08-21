@@ -67,7 +67,7 @@ example (ha : IsStarNormal a) : star a * a = star a * a := by
 /--
 error: `cfc_pull` made no progress
   `cfc_pull` got stuck on `f a`
-    (head symbol: _, target: cfc over ℂ)
+    (head symbol: _, target: cfc over ℂ at `a`)
 -/
 #guard_msgs in
 example (ha : IsStarNormal a) (f : A → A) : f a = f a := by
@@ -76,7 +76,7 @@ example (ha : IsStarNormal a) (f : A → A) : f a = f a := by
 /--
 error: `cfc_pull` made no progress
   `cfc_pull` got stuck on `star b * b`
-    (head symbol: HMul.hMul, target: cfc over ℂ)
+    (head symbol: HMul.hMul, target: cfc over ℂ at `a`)
 -/
 #guard_msgs in
 example (ha : IsStarNormal a) : star b * b = star b * b := by
@@ -95,7 +95,7 @@ example (ha : IsStarNormal a) : star a * a = star a * a := by
 /--
 error: `cfc_pull` made no progress
   `cfc_pull` got stuck on `a⁺`
-    (head symbol: PosPart.posPart, target: cfc over ℝ≥0)
+    (head symbol: PosPart.posPart, target: cfc over ℝ≥0 at `a`)
 -/
 #guard_msgs in
 example (ha : IsSelfAdjoint a) : a⁺ = a⁺ := by

@@ -24,8 +24,10 @@ namespace Mathlib.Tactic.CFCPull
 
 open Lean Meta Elab Tactic
 
-/-- Elaborate the configuration of `cfc_pull`. -/
-declare_config_elab elabCFCPullConfig Config
+/-- Elaborate the configuration of `cfc_pull`. `discharger` is omitted because its value is a
+tactic rather than a term; `mkConfig` fills it in from the `(disch := ..)` clause. -/
+declare_config_elab elabCFCPullConfig Config where
+  omit discharger
 
 /-! ### Side goals -/
 
@@ -41,7 +43,11 @@ def tryTacticOn (g : MVarId) (tac : TSyntax `tactic) : TacticM Bool := do
   return false
 
 /-- The auto-param tactic that the continuous functional calculus API itself would use for a
-hypothesis of this kind. -/
+hypothesis of this kind.
+
+`.other` gets the predicate tactic too. Its classification is deliberately coarse (see
+`SideGoalKind.ofType`), so a goal landing there is often a predicate goal in disguise: `0 ≤ a * a`
+is the predicate of the calculus over `ℝ≥0`, but is not recognised as one. -/
 def SideGoalKind.tactic : SideGoalKind → MetaM (TSyntax `tactic)
   | .continuity => `(tactic| cfc_cont_tac)
   | .mapZero => `(tactic| cfc_zero_tac)
@@ -56,8 +62,9 @@ def SideGoalKind.tactic : SideGoalKind → MetaM (TSyntax `tactic)
       | cfc_tac)
 
 /-- Try to close the side goals raised by the pull: `assumption` first, then the auto-param
-tactic for the goal's kind. Duplicates are merged, which matters because the two sides of a
-relation are pulled independently and so tend to ask for the same predicate twice.
+tactic for the goal's kind, and finally — for the goals the calculus API has no auto-param for —
+`cfg.discharger`. Duplicates are merged, which matters because the two sides of a relation are
+pulled independently and so tend to ask for the same predicate twice.
 
 Whatever survives is an error unless `+defer` was given, in which case it is returned to be added
 to the goal list. -/
@@ -76,10 +83,20 @@ def postProcessSideGoals (cfg : Config) (goals : Array MVarId) : TacticM (Array 
     if ← g.assumptionCore then
       trace[Tactic.cfc_pull] "{checkEmoji} closed `{type}` with `assumption`"
       continue
-    let tac ← (SideGoalKind.ofTag (← g.getTag)).tactic
+    let kind := SideGoalKind.ofTag (← g.getTag)
+    let tac ← kind.tactic
     if ← tryTacticOn g tac then
       trace[Tactic.cfc_pull] "{checkEmoji} closed `{type}` with `{tac}`"
       continue
+    /- The user's discharger is the last resort, and only for `.other`: the hypotheses peculiar
+    to an individual `@[cfc_pull]` lemma, which the calculus API has no tactic for. It is run
+    separately rather than appended to `kind.tactic` with `first`, because that tactic ends in
+    `cfc_tac`, which never fails and so would swallow the alternative. -/
+    if kind == .other then
+      if let some disch := cfg.discharger then
+        if ← tryTacticOn g disch then
+          trace[Tactic.cfc_pull] "{checkEmoji} closed `{type}` with the discharger `{disch}`"
+          continue
     trace[Tactic.cfc_pull] "{crossEmoji} could not close `{type}`"
     out := out.push g
   unless cfg.defer || out.isEmpty do
@@ -127,7 +144,10 @@ def inferCFCApp (target : Expr) : MetaM CFCApp := do
 result. Returns the new goal (unless it was closed by `rfl`) and the surviving side goals. -/
 def cfcPullTarget (cfg : Config) (R elem : Expr) (goal : MVarId) : TacticM Unit := do
   let alg ← inferType elem
-  let target ← instantiateMVars (← goal.getType)
+  -- `consumeMData` is not optional: a goal type routinely arrives wrapped in an
+  -- `mdata noImplicitLambda` annotation left by the elaborator, and `Expr.getAppArgs` does not
+  -- see through `mdata`, so `targetPositions` below would find no arguments at all.
+  let target := (← instantiateMVars (← goal.getType)).consumeMData
   let positions ← targetPositions target alg
   if positions.isEmpty then
     throwError "`cfc_pull` found nothing of type `{alg}` in the goal{indentExpr target}"
@@ -243,6 +263,9 @@ Configuration:
   non-unital `cfcₙ`. With `+unital` the tactic falls back to `cfcₙ` in an algebra with no unital
   functional calculus.
 * `+defer`: return the side goals that could not be discharged instead of failing.
+* `(disch := tac)`: run `tac` on side goals that none of the above closed. Only the goals tagged
+  `cfc_pull.side` reach it — the hypotheses peculiar to an individual `@[cfc_pull]` lemma, for
+  which the calculus API has no auto-param tactic. As in `simp`, the default does nothing.
 * `(maxDepth := n)`: the recursion depth limit.
 
 In `conv` mode, `cfc_pull` acts on the current `conv` target, which is the way to pull at a
@@ -268,11 +291,18 @@ example : ∑ i ∈ s, star (cfc (g i) a) = cfc (∑ i ∈ s, fun x ↦ star (g 
 The lemmas the tactic uses are those tagged `@[cfc_pull]`; `set_option trace.Tactic.cfc_pull
 true` shows which were tried and why they failed.
 -/
-syntax (name := cfcPull) "cfc_pull" optConfig
+syntax (name := cfcPull) "cfc_pull"
+  -- The config parser has to be `Lean.Parser.Tactic.optConfig`, not the
+  -- `Lean.Parser.Term.optConfig` that `open Lean` puts in scope: only the former excludes
+  -- `disch`/`discharger` from the identifiers its `valConfigItem` accepts, and so only it
+  -- leaves the clause that follows to be parsed. With the other one the configuration swallows
+  -- `(disch := ..)` and reports it as an unknown configuration option.
+  Lean.Parser.Tactic.optConfig (Lean.Parser.Tactic.discharger)?
   (ppSpace colGt term:max)? (ppSpace colGt term:max)? : tactic
 
 @[inherit_doc cfcPull]
-syntax (name := cfcPullConv) "cfc_pull" optConfig
+syntax (name := cfcPullConv) "cfc_pull"
+  Lean.Parser.Tactic.optConfig (Lean.Parser.Tactic.discharger)?
   (ppSpace colGt term:max)? (ppSpace colGt term:max)? : conv
 
 /-- Whether the user explicitly mentioned the configuration field `field`. -/
@@ -280,31 +310,40 @@ def configMentions (stx : Syntax) (field : Name) : Bool :=
   (stx.find? fun s => s.isIdent && s.getId == field).isSome
 
 /-- Read the configuration, taking into account the unitality of a calculus found in the goal
-when the user did not mention `unital` explicitly. -/
-def mkConfig (cfgStx : TSyntax ``Lean.Parser.Term.optConfig) (goalUnital : Option Bool) :
+when the user did not mention `unital` explicitly, and the `(disch := ..)` clause, which
+`elabCFCPullConfig` cannot see. -/
+def mkConfig (cfgStx : TSyntax ``Lean.Parser.Tactic.optConfig)
+    (disch? : Option (TSyntax ``Lean.Parser.Tactic.discharger)) (goalUnital : Option Bool) :
     TacticM Config := do
   let mut cfg ← elabCFCPullConfig cfgStx
   if !configMentions cfgStx `unital then
     if let some u := goalUnital then
       cfg := { cfg with unital := u }
+  if let some disch := disch? then
+    -- the keyword is `patternIgnore`d in the parser, so it does not appear in the tree
+    let `(Lean.Parser.Tactic.discharger| ($_ := $tac)) := disch | throwUnsupportedSyntax
+    -- parenthesised so that a multi-tactic sequence stays one tactic
+    cfg := { cfg with discharger := some (← `(tactic| ($tac))) }
   return cfg
 
 /-- Elaborator for the `cfc_pull` tactic. -/
 @[tactic cfcPull]
 def evalCFCPull : Tactic := fun stx => withMainContext do
-  let `(tactic| cfc_pull $cfg:optConfig $[$ring?]? $[$elem?]?) := stx | throwUnsupportedSyntax
+  let `(tactic| cfc_pull $cfg:optConfig $[$disch?]? $[$ring?]? $[$elem?]?) := stx
+    | throwUnsupportedSyntax
   let goal ← getMainGoal
-  let target ← instantiateMVars (← goal.getType)
+  let target := (← instantiateMVars (← goal.getType)).consumeMData
   let (R, elem, goalUnital) ← elabRingAndElem target ring? elem?
-  cfcPullTarget (← mkConfig cfg goalUnital) R elem goal
+  cfcPullTarget (← mkConfig cfg disch? goalUnital) R elem goal
 
 /-- Elaborator for `cfc_pull` in `conv` mode. -/
 @[tactic cfcPullConv]
 def evalCFCPullConv : Tactic := fun stx => withMainContext do
-  let `(conv| cfc_pull $cfg:optConfig $[$ring?]? $[$elem?]?) := stx | throwUnsupportedSyntax
-  let lhs ← Conv.getLhs
+  let `(conv| cfc_pull $cfg:optConfig $[$disch?]? $[$ring?]? $[$elem?]?) := stx
+    | throwUnsupportedSyntax
+  let lhs := (← Conv.getLhs).consumeMData
   let (R, elem, goalUnital) ← elabRingAndElem lhs ring? elem?
-  let cfg ← mkConfig cfg goalUnital
+  let cfg ← mkConfig cfg disch? goalUnital
   let (newLhs, proof, sideGoals) ← runPull cfg R elem lhs
   Conv.updateLhs newLhs proof
   let sideGoals ← postProcessSideGoals cfg sideGoals

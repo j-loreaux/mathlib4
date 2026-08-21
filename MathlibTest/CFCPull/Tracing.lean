@@ -142,12 +142,13 @@ example (ha : IsStrictlyPositive a) :
 When the tactic gets stuck, the trace is the way to find out why. `💥️` marks the node that
 failed, and the reason here is that the only lemma indexed under `PosPart.posPart` lives over
 `ℝ`, from which there is no conversion to the requested `ℝ≥0` — so it is not even offered as a
-candidate. Contrast this with the error message, which only reports the head symbol. -/
+candidate. The error message reports the head symbol and the element being pulled towards, but
+not that reason. -/
 
 /--
 error: `cfc_pull` made no progress
   `cfc_pull` got stuck on `a⁺`
-    (head symbol: PosPart.posPart, target: cfc over ℝ≥0)
+    (head symbol: PosPart.posPart, target: cfc over ℝ≥0 at `a`)
 ---
 trace: [Tactic.cfc_pull] predicate for cfc over ℝ≥0 is fun x => 0 ≤ x
 [Tactic.cfc_pull] 💥️ pull a⁺ into a cfc over ℝ≥0

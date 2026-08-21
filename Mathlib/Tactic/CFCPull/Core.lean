@@ -62,6 +62,17 @@ structure Config where
   defer : Bool := false
   /-- The maximum recursion depth. -/
   maxDepth : Nat := 48
+  /-- A tactic to try on side goals `cfc_pull` has no built-in way to prove: the ones tagged
+  `cfc_pull.side`, which are the hypotheses of a `@[cfc_pull]` lemma that are neither the
+  predicate, nor continuity, nor `f 0 = 0`, and so have no auto-param tactic in the calculus
+  API to fall back on. Something like `∀ x ∈ spectrum R a, f x ≠ 0`.
+
+  The default, `none`, does nothing, and such a goal comes straight back to the user. Set it
+  with `cfc_pull (disch := tac) ..`, as for `simp` and `fun_prop`.
+
+  This field is not settable through `optConfig` — a tactic is not a term — so it is omitted
+  from `elabCFCPullConfig` and filled in by `mkConfig` from the `(disch := ..)` clause. -/
+  discharger : Option (TSyntax `tactic) := none
   deriving Inhabited
 
 /-- Which continuous functional calculus we are producing: a scalar ring, and whether the
@@ -592,8 +603,19 @@ partial def pull (e : Expr) (want : Mode) : PullM Result := withIncDepth do
         let res ← pull newE want
         return { res with proof := ← mkEqTrans step res.proof }
       if let some r := r then return r
-    throwError "`cfc_pull` got stuck on `{e}`{indentD m!"(head symbol: \
-      {e.getAppFn.constName?.getD `_}, target: {want})"}"
+    let mut msg := m!"`cfc_pull` got stuck on `{e}`{indentD m!"(head symbol: \
+      {e.getAppFn.constName?.getD `_}, target: {want} at `{ctx.elem}`)"}"
+    /- The one failure worth spelling out: `e` is already an application of the calculus, just
+    to the wrong element. `cfc_pull` only ever rewrites the calculus at a *more* complicated
+    element into the calculus at a simpler one, so this is a dead end, and it usually means the
+    element was inferred from the wrong side of the goal. -/
+    if let some c := CFCApp.match? e then
+      unless ← withNewMCtxDepth <| withReducible <| isDefEq c.a ctx.elem do
+        msg := msg ++ m!"\nThe calculus is already applied here, but to a different\n\
+          element; `cfc_pull` only ever makes the element simpler, never more\n\
+          complicated. If it is that element you meant to pull towards, name\n\
+          it:{indentD m!"cfc_pull {want.ring} {c.a}"}"
+    throwError msg
 
 /-- Handle `e = cfc g b`: either `b` is the element we are pulling towards, or we are looking at
 a composition. -/
@@ -684,6 +706,8 @@ def mkMode (cfg : Config) (R alg : Expr) : MetaM Mode := do
 /-- Run the core of `cfc_pull` on `e`: returns the rewritten expression, a proof that `e` equals
 it, and the side goals that proof depends on. -/
 def runPull (cfg : Config) (R elem e : Expr) : MetaM (Expr × Expr × Array MVarId) := do
+  -- see the note in `cfcPullTarget`: nothing downstream looks through `mdata`
+  let e := e.consumeMData
   let alg ← inferType elem
   unless ← isDefEq (← inferType e) alg do
     throwError "`cfc_pull`: `{e}` does not live in the algebra `{alg}`"

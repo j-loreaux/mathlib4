@@ -90,6 +90,16 @@ example (ha : p a) {ι : Type*} {s : Finset ι} {h : ι → R → R}
   cfc_pull +defer R a
   case cfc_pull.side => exact fun i _ ↦ (hh i).star
 
+/- The same goal, discharged in place instead of deferred. `(disch := tac)` runs `tac` on the
+`cfc_pull.side` goals, and only on those: the hypotheses peculiar to an individual lemma, here
+the continuity hypothesis of `cfc_sum`, which is stated under a binder and so is out of
+`cfc_cont_tac`'s reach. -/
+example (ha : p a) {ι : Type*} {s : Finset ι} {h : ι → R → R}
+    (hh : ∀ i, ContinuousOn (h i) (spectrum R a)) :
+    ∑ i ∈ s, star (cfc (h i) a) = cfc (∑ i ∈ s, fun x ↦ star (h i x)) a := by
+  conv_lhs => enter [2, i]; cfc_pull R a
+  cfc_pull (disch := intro i _; fun_prop) R a
+
 end GenericUnital
 
 section GenericNonUnital
