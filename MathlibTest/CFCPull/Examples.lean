@@ -36,8 +36,6 @@ with `cfc_congr`.
 
 /- The predicate hypotheses below are used by `cfc_pull` itself (it tries `assumption` on the
 side goals it raises), which the unused-variable linter cannot see. -/
-set_option linter.unusedVariables false
-set_option maxHeartbeats 1000000
 
 section GenericUnital
 
@@ -83,7 +81,7 @@ example (ha : p a) (b : A) :
 
 /- `cfc_pull` does not go under binders; `conv` does. Pull each summand under the binder first,
 and then let `cfc_sum` collect the result. -/
-example (ha : p a) {ι : Type*} {s : Finset ι} {h : ι → R → R}
+example {ι : Type*} {s : Finset ι} {h : ι → R → R}
     (hh : ∀ i, ContinuousOn (h i) (spectrum R a)) :
     ∑ i ∈ s, star (cfc (h i) a) = cfc (∑ i ∈ s, fun x ↦ star (h i x)) a := by
   conv_lhs => enter [2, i]; cfc_pull R a
@@ -94,7 +92,7 @@ example (ha : p a) {ι : Type*} {s : Finset ι} {h : ι → R → R}
 `cfc_pull.side` goals, and only on those: the hypotheses peculiar to an individual lemma, here
 the continuity hypothesis of `cfc_sum`, which is stated under a binder and so is out of
 `cfc_cont_tac`'s reach. -/
-example (ha : p a) {ι : Type*} {s : Finset ι} {h : ι → R → R}
+example {ι : Type*} {s : Finset ι} {h : ι → R → R}
     (hh : ∀ i, ContinuousOn (h i) (spectrum R a)) :
     ∑ i ∈ s, star (cfc (h i) a) = cfc (∑ i ∈ s, fun x ↦ star (h i x)) a := by
   conv_lhs => enter [2, i]; cfc_pull R a
@@ -155,8 +153,7 @@ example (ha : IsSelfAdjoint a) :
     NormedSpace.exp a = cfc Real.exp a := by
   cfc_pull ℝ a
 
-example (ha : 0 ≤ a) :
-    CFC.sqrt a = cfcₙ NNReal.sqrt a := by
+example : CFC.sqrt a = cfcₙ NNReal.sqrt a := by
   cfc_pull ℝ≥0 a
 
 /- Over `ℝ`, `CFC.sqrt` is pulled with `CFC.sqrt_eq_real_sqrt` rather than by converting the
@@ -166,7 +163,7 @@ example (ha : 0 ≤ a) :
   cfc_pull ℝ a
 
 /- Here `f` is arbitrary, so its continuity is a genuine side goal. -/
-example (ha : IsSelfAdjoint a) (f : ℝ≥0 → ℝ≥0) (hf0 : f 0 = 0)
+example (f : ℝ≥0 → ℝ≥0) (hf0 : f 0 = 0)
     (hf : ContinuousOn f (quasispectrum ℝ≥0 (CFC.sqrt (a ^ 2)))) :
     CFC.sqrt (CFC.sqrt (a ^ 2)) + cfcₙ f (CFC.sqrt (a ^ 2)) =
       cfcₙ (fun x ↦ NNReal.sqrt x + f x) (CFC.sqrt (a ^ 2)) := by
@@ -179,12 +176,10 @@ example (ha : IsSelfAdjoint a) :
   cfc_pull ℂ a
 
 /- `a⁺`/`a⁻`, keeping the non-unital `cfcₙ` head even in a unital algebra. -/
-example (ha : IsSelfAdjoint a) :
-    a⁺ - a⁻ = cfcₙ (fun x : ℝ ↦ x⁺ - x⁻) a := by
+example : a⁺ - a⁻ = cfcₙ (fun x : ℝ ↦ x⁺ - x⁻) a := by
   cfc_pull -unital ℝ a
 
-example :
-    a⁺ * a⁻ = cfcₙ (fun x : ℝ ↦ x⁺ * x⁻) a := by
+example : a⁺ * a⁻ = cfcₙ (fun x : ℝ ↦ x⁺ * x⁻) a := by
   cfc_pull -unital ℝ a
 
 /- Mixing the (non-unital) `a⁺` with the unital constant `1` forces a `cfc` head. -/
@@ -203,12 +198,11 @@ example (a : A) (x : ℝ) :
     a ^ x = cfc (fun t : ℝ≥0 ↦ t ^ x) a := by
   cfc_pull ℝ≥0 a
 
-example (ha : 0 ≤ a) (x y : ℝ) (hx : 0 ≤ x) (hy : 0 ≤ y) :
+example (x y : ℝ) (hx : 0 ≤ x) (hy : 0 ≤ y) :
     a ^ x * a ^ y = cfc (fun t : ℝ≥0 ↦ t ^ x * t ^ y) a := by
   cfc_pull ℝ≥0 a
 
-example (ha : 0 ≤ a) :
-    CFC.sqrt a * CFC.sqrt a = cfcₙ (fun t : ℝ≥0 ↦ NNReal.sqrt t * NNReal.sqrt t) a := by
+example : CFC.sqrt a * CFC.sqrt a = cfcₙ (fun t : ℝ≥0 ↦ NNReal.sqrt t * NNReal.sqrt t) a := by
   cfc_pull ℝ≥0 a
 
 example (ha : IsSelfAdjoint a) :
@@ -233,8 +227,7 @@ example (u : Aˣ) (ha : IsStarNormal (u : A)) :
     (↑u⁻¹ : A) = cfc (fun x : ℂ ↦ x⁻¹) (u : A) := by
   cfc_pull ℂ (u : A)
 
-example (ha : IsStarNormal a) (f g : ℂ → ℂ)
-    (hf : ContinuousOn f (spectrum ℂ a)) (hg : ContinuousOn g (spectrum ℂ a)) :
+example (f g : ℂ → ℂ) (hf : ContinuousOn f (spectrum ℂ a)) (hg : ContinuousOn g (spectrum ℂ a)) :
     cfc f a * cfc g a = cfc (fun z ↦ f z * g z) a := by
   cfc_pull ℂ a
 
@@ -259,8 +252,7 @@ example (a : A) :
     CFC.abs a = cfcₙ NNReal.sqrt (star a * a) := by
   cfc_pull ℝ≥0 (star a * a)
 
-example (ha : 0 ≤ a) :
-    CFC.sqrt a * CFC.sqrt a = cfcₙ (fun t : ℝ≥0 ↦ NNReal.sqrt t * NNReal.sqrt t) a := by
+example : CFC.sqrt a * CFC.sqrt a = cfcₙ (fun t : ℝ≥0 ↦ NNReal.sqrt t * NNReal.sqrt t) a := by
   cfc_pull ℝ≥0 a
 
 /- The element is `star a * a`, not `a` itself. -/
@@ -270,7 +262,7 @@ example (a : A) (f : ℝ≥0 → ℝ≥0) (hf0 : f 0 = 0)
       cfcₙ (fun x ↦ NNReal.sqrt x + f x) (star a * a) := by
   cfc_pull ℝ≥0 (star a * a)
 
-example (ha : IsStarNormal a) (f g : ℂ → ℂ) (hf0 : f 0 = 0) (hg0 : g 0 = 0)
+example (f g : ℂ → ℂ) (hf0 : f 0 = 0) (hg0 : g 0 = 0)
     (hf : ContinuousOn f (quasispectrum ℂ a)) (hg : ContinuousOn g (quasispectrum ℂ a)) :
     cfcₙ f a * cfcₙ g a = cfcₙ (fun z ↦ f z * g z) a := by
   cfc_pull ℂ a
@@ -280,7 +272,7 @@ example (ha : IsSelfAdjoint a) :
     (-a)⁺ = cfcₙ (fun x : ℝ ↦ (-x)⁺) a := by
   cfc_pull ℝ a
 
-example (ha : 0 ≤ a) (y : ℝ≥0) (hy : y ≠ 0) :
+example (y : ℝ≥0) (hy : y ≠ 0) :
     CFC.sqrt a * a ^ y = cfcₙ (fun t : ℝ≥0 ↦ NNReal.sqrt t * NNReal.nnrpow t y) a := by
   cfc_pull ℝ≥0 a
 
@@ -325,7 +317,7 @@ example (ha : IsStrictlyPositive a) :
   case cfc_pull.continuity => exact Real.continuousOn_log.mono fun x hx h ↦ spectrum.zero_notMem ℝ ha.2 (h ▸ hx)
 
 /- The same story one ring down: `(· ^ x)` on `ℝ≥0` is continuous away from `0` when `x < 0`. -/
-example (ha : IsStrictlyPositive a) (x : ℝ) (hx : x < 0) :
+example (ha : IsStrictlyPositive a) (x : ℝ) :
     a ^ x * a ^ x = cfc (fun t : ℝ≥0 ↦ t ^ x * t ^ x) a := by
   cfc_pull +defer ℝ≥0 a
   case cfc_pull.continuity => exact NNReal.continuousOn_rpow_const (.inl (spectrum.zero_notMem ℝ≥0 ha.2))
@@ -378,7 +370,7 @@ variable {a : A}
 open Complex
 open scoped NNReal
 
-example [Nontrivial A] (ha : IsSelfAdjoint a) :
+example (ha : IsSelfAdjoint a) :
     a + I • cfcₙ Real.sqrt (1 - a ^ 2) = cfc (fun x ↦ x + I * ↑√(1 - x.re ^ 2)) a := by
   cfc_pull ℂ a
 
@@ -386,7 +378,7 @@ example [Nontrivial A] (ha : IsSelfAdjoint a) :
 not close the goal: it produces `fun x ↦ x + I * ↑√(1 - x.re ^ 2)`, whereas the statement asks
 for `fun x ↦ ↑x.re + I * ↑√(1 - x.re ^ 2)`. Both are correct — `a` is selfadjoint, so the two
 functions agree on `spectrum ℂ a` — and closing the gap is exactly the job of `cfc_congr`. -/
-example [Nontrivial A] (ha : IsSelfAdjoint a) (ha_norm : ‖a‖ ≤ 1) :
+example (ha : IsSelfAdjoint a) :
     a + I • cfcₙ Real.sqrt (1 - a ^ 2) = cfc (fun x ↦ ↑x.re + I * ↑√(1 - x.re ^ 2)) a := by
   cfc_pull ℂ a
   refine cfc_congr fun x hx ↦ ?_
