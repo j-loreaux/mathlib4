@@ -296,7 +296,21 @@ example : star a * a + b = cfc (fun x : R ↦ star x * x) a + b := by
 ```
 
 A `conv` block cannot end with unsolved goals — the same restriction that `rw` inside `conv` is
-subject to — so neither `+defer` nor `+deferAll` is of any use there.
+subject to — so a side goal that survives the discharging is fatal there, and deferring it is no
+help. A trailing `=> tac` block is the way out: it takes the side goals, and only those, as its
+goal list and must leave none of them open. It implies `+defer`, so the pull no longer errors on
+what it could not close:
+
+```lean
+example : CFC.log a * CFC.log a + b = cfc (fun x : ℝ ↦ Real.log x * Real.log x) a + b := by
+  conv in CFC.log a * CFC.log a =>
+    cfc_pull ℝ a => exact Real.continuousOn_log.mono fun x hx h ↦ ...
+```
+
+The goals keep their kind tags inside the block, so `case cfc_pull.continuity => ..` works there
+as it does in tactic mode, and `+deferAll .. => all_goals tac` is the conv-mode counterpart of
+`cfc_pull +deferAll .. <;> tac`. The block is a `tacticSeq` and so is delimited by indentation:
+a `conv` step at the enclosing level continues the block it is in, rather than being swallowed.
 
 Going under a binder is `conv`'s job rather than the tactic's, which makes sums and the like a
 two-step affair:
@@ -322,7 +336,8 @@ syntax (name := cfcPull) "cfc_pull"
 @[inherit_doc cfcPull]
 syntax (name := cfcPullConv) "cfc_pull"
   Lean.Parser.Tactic.optConfig (Lean.Parser.Tactic.discharger)?
-  (ppSpace colGt term:max)? (ppSpace colGt term:max)? : conv
+  (ppSpace colGt term:max)? (ppSpace colGt term:max)?
+  (" => " tacticSeq)? : conv
 
 /-- Whether the user explicitly mentioned the configuration field `field`. -/
 def configMentions (stx : Syntax) (field : Name) : Bool :=
@@ -358,14 +373,33 @@ def evalCFCPull : Tactic := fun stx => withMainContext do
 /-- Elaborator for `cfc_pull` in `conv` mode. -/
 @[tactic cfcPullConv]
 def evalCFCPullConv : Tactic := fun stx => withMainContext do
-  let `(conv| cfc_pull $cfg:optConfig $[$disch?]? $[$ring?]? $[$elem?]?) := stx
+  let `(conv| cfc_pull $cfg:optConfig $[$disch?]? $[$ring?]? $[$elem?]? $[=> $tac?]?) := stx
     | throwUnsupportedSyntax
   let lhs := (← Conv.getLhs).consumeMData
   let (R, elem, goalUnital) ← elabRingAndElem lhs ring? elem?
-  let cfg ← mkConfig cfg disch? goalUnital
+  let mut cfg ← mkConfig cfg disch? goalUnital
+  /- A `=> tac` block is what disposes of the survivors, so `postProcessSideGoals` must hand
+  them over rather than report them: the block implies `+defer`. It does not imply `+deferAll` —
+  the auto-param tactics still run, and the block sees only what they left, exactly as the
+  tactic after `cfc_pull +defer ..` does in tactic mode. -/
+  if tac?.isSome then cfg := { cfg with defer := true }
   let (newLhs, proof, sideGoals) ← runPull cfg R elem lhs
   Conv.updateLhs newLhs proof
   let sideGoals ← postProcessSideGoals cfg sideGoals
-  replaceMainGoal ((← getGoals) ++ sideGoals.toList)
+  let some tac := tac? | replaceMainGoal ((← getGoals) ++ sideGoals.toList)
+  /- Run the block with the side goals, and only those, as the goal list: the `conv` goal is set
+  aside so that the block cannot touch it, and restored afterwards. Handing over the whole list
+  rather than one goal at a time is what lets `case cfc_pull.continuity => ..` be written here,
+  the goals having kept their kind tags. -/
+  let convGoals ← getGoals
+  setGoals sideGoals.toList
+  evalTactic tac
+  let remaining ← getGoals
+  unless remaining.isEmpty do
+    throwError "`cfc_pull` ran the `=> ..` block, but {remaining.length} side \
+      goal{if remaining.length == 1 then " is" else "s are"} still open:\
+      {indentD (goalsToMessageData remaining)}\n\
+      A `conv` block cannot end with unsolved goals, so the `=> ..` block must close every one."
+  setGoals convGoals
 
 end Mathlib.Tactic.CFCPull

@@ -28,7 +28,8 @@ two functions agree — and discharges the hypotheses of the lemmas it used with
 the standard auto-param tactics `cfc_tac`, `cfc_cont_tac` and `cfc_zero_tac`. Anything it cannot
 close is an error unless `+defer` is given, in which case it becomes a goal named after its kind
 (`cfc_pull.continuity`, `cfc_pull.predicate`, `cfc_pull.mapZero`, `cfc_pull.side`). `+deferAll`
-skips the discharging altogether and hands back every side goal, deduplicated.
+skips the discharging altogether and hands back every side goal, deduplicated. In `conv` mode,
+where a leftover goal cannot escape the block, a trailing `=> tac` block closes them in place.
 
 Examples that `cfc_pull` deliberately does *not* finish are marked as such; in every case what is
 left over is either an honest side condition or an equality of functions that has to be settled
@@ -392,6 +393,62 @@ example (ha : IsSelfAdjoint a) (f : ℝ → ℝ) (hf : Continuous f)
   case cfc_pull.continuity => fun_prop
 
 end DeferAllCStar
+
+section ConvSideGoals
+
+/-! ## `=> tac`: side goals inside a `conv` block
+
+A `conv` block cannot end with unsolved goals, so in `conv` mode a side goal that survives the
+discharging is fatal, and `+defer`/`+deferAll` — which only move goals onto the goal list — are
+no help at all. The `=> tac` block is the way out, and is to `conv` mode what the tactic
+following `cfc_pull +defer ..` is to tactic mode: the surviving side goals become its goal list,
+the `conv` goal is set aside so the block cannot touch it, and the block has to close all of
+them. Writing the block implies `+defer`. -/
+
+variable {A : Type*} [CStarAlgebra A] [PartialOrder A] [StarOrderedRing A]
+variable {a : A}
+
+/- The motivating case. `Real.log` is continuous only away from `0`, so `cfc_cont_tac` cannot
+close the continuity goal, and without the block this `conv` cannot be closed at all. -/
+example (ha : IsStrictlyPositive a) (b : A) :
+    CFC.log a * CFC.log a + b = cfc (fun x : ℝ ↦ Real.log x * Real.log x) a + b := by
+  conv in CFC.log a * CFC.log a =>
+    cfc_pull ℝ a =>
+      exact Real.continuousOn_log.mono fun x hx h ↦ spectrum.zero_notMem ℝ ha.2 (h ▸ hx)
+
+/- The goals keep their kind tags inside the block, so `case` addresses a group here exactly as
+it does in tactic mode. -/
+example (ha : IsStrictlyPositive a) (b : A) :
+    CFC.log a * CFC.log a + b = cfc (fun x : ℝ ↦ Real.log x * Real.log x) a + b := by
+  conv in CFC.log a * CFC.log a =>
+    cfc_pull ℝ a =>
+      case cfc_pull.continuity =>
+        exact Real.continuousOn_log.mono fun x hx h ↦ spectrum.zero_notMem ℝ ha.2 (h ▸ hx)
+
+/- `+deferAll .. => all_goals tac` is the `conv`-mode counterpart of the tactic-mode idiom
+`cfc_pull +deferAll .. <;> tac`: the block faces the hypotheses of the lemmas the pull used,
+rather than whatever the auto-param tactics happened to leave. This pull needs no block at all
+without `+deferAll` — the discharging closes all three goals — which is what makes it the honest
+illustration of what the flag hands over. -/
+example (ha : IsStarNormal a) (b : A) :
+    star a * a + b = cfc (fun x : ℂ ↦ star x * x) a + b := by
+  conv in star a * a =>
+    cfc_pull +deferAll ℂ a =>
+      case cfc_pull.predicate => exact ha
+      all_goals fun_prop
+
+/- The block is a tactic sequence and so is delimited by indentation: the `conv` step after it
+belongs to the enclosing `conv` block and is not swallowed. Unlike `equals`, the block does not
+have to come last. -/
+example (ha : IsStrictlyPositive a) (b : A) :
+    CFC.log a * CFC.log a + b = cfc (fun x : ℝ ↦ Real.log x * Real.log x) a + b := by
+  conv_lhs =>
+    enter [1]
+    cfc_pull ℝ a =>
+      exact Real.continuousOn_log.mono fun x hx h ↦ spectrum.zero_notMem ℝ ha.2 (h ▸ hx)
+    rfl
+
+end ConvSideGoals
 
 section RealTheorems
 

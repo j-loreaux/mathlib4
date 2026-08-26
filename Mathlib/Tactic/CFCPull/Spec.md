@@ -67,7 +67,7 @@ cfc_pull (config)? (R)? (a)?
 ```
 and, in `conv` mode,
 ```
-conv ... => cfc_pull (config)? (R)? (a)?
+conv ... => cfc_pull (config)? (R)? (a)? (=> tac)?
 ```
 
 * `R` is the scalar ring, `a` the element of the algebra. Both are optional and positional; if
@@ -93,6 +93,9 @@ conv ... => cfc_pull (config)? (R)? (a)?
   a term, so it is a separate syntax node and `elabCFCPullConfig` omits the corresponding field.
   The default does nothing, and so does any discharger given alongside `+deferAll`, which skips
   every attempt at a side goal.
+* **The `=> tac` block** (`conv` mode only). A tactic sequence that is handed the side goals the
+  pull did not close, and must close all of them; see [§7](#7-side-goals). It exists because a
+  `conv` block cannot end with unsolved goals, which is what makes deferring useless there.
 
 ### Behaviour on the goal
 
@@ -105,10 +108,11 @@ the result (which closes goals like `star a * a = cfc (fun x ↦ star x * x) a` 
 
 In `conv` mode the current `conv` target is pulled, which gives the user complete control over
 *where* the pull happens; this replaces the "pattern" idea in the original draft, at no cost in
-expressiveness and with no new syntax to learn. Note that a `conv` block cannot end with unsolved
-goals, so in `conv` mode a surviving side goal is an error and neither `+defer` nor `+deferAll`
-is of any use there. This is not specific to `cfc_pull` — `rw` inside `conv` behaves the same
-way.
+expressiveness. A `conv` block cannot end with unsolved goals — this is not specific to
+`cfc_pull`, `rw` inside `conv` behaves the same way — so a side goal that survives the
+discharging is fatal there, and returning it to the goal list, which is all `+defer` and
+`+deferAll` do, cannot help. The `=> tac` block is the way out: it takes those goals as its own
+goal list and has to close them, inside the `conv` block, before it ends. See [§7](#7-side-goals).
 
 ## 3. Scalar rings
 
@@ -331,7 +335,8 @@ goal. The tactic handles them as follows.
   `ContinuousOn` goal. The discharger is run as a separate attempt rather than as another branch
   of the `first` above, because that `first` ends in `cfc_tac`, which never fails.
 * Anything still open is **an error**, listing the goals. With `+defer` they are returned and
-  added to the goal list after the main goal instead.
+  added to the goal list after the main goal instead, and in `conv` mode with a `=> tac` block
+  they are handed to that block.
 
 Note that `+defer` does not switch the discharging off; it only changes what happens to the
 survivors. The reason is that "discharge the easy ones and hand me the rest" is by far the most
@@ -352,6 +357,29 @@ Deduplication is what makes the second use workable: without it, the two sides o
 hand back the same `ContinuousOn` goal twice, and the shared `p a` goal (§4) is the only one
 that would be immune. `set_option trace.Tactic.cfc_pull true` remains the finer-grained view: it
 reports each side goal as it is created and what became of it.
+
+### The `=> tac` block in `conv` mode
+
+Neither `+defer` nor `+deferAll` is usable inside a `conv` block, because `conv` cannot carry
+unsolved goals out of one. The `=> tac` block is the `conv`-mode replacement for the tactic that
+would follow `cfc_pull +defer ..` in tactic mode: the side goals become its goal list, the
+`conv` goal is set aside for the duration so the block cannot touch it, and the block must leave
+none of them open — what survives is an error naming the goals.
+
+* It **implies `+defer`**, so the pull no longer errors on what it could not close: writing the
+  block is the whole declaration of intent. It does not imply `+deferAll`; the auto-param
+  tactics run first as usual, and the block sees only the remainder.
+* The goals arrive with their kind tags, so `case cfc_pull.continuity => ..` addresses a group
+  inside the block exactly as it does outside one.
+* `+deferAll .. => all_goals tac` is the `conv`-mode counterpart of the tactic-mode idiom
+  `cfc_pull +deferAll .. <;> tac`, and for the same reason: the goal list is then the
+  hypotheses of the lemmas used, not whatever `fun_prop` happened to leave.
+* The block is a `tacticSeq`, and so is delimited by indentation. A `conv` step at the enclosing
+  level continues the block it is in rather than being swallowed, so the `=> tac` block does not
+  have to come last in a `conv` sequence.
+
+The block is `conv`-only. In tactic mode the tactic that follows `cfc_pull` already does this
+job, and there is nothing for a dedicated syntax to add.
 
 ## 8. Worked examples
 
@@ -573,7 +601,3 @@ conversions applied.
 * **Lemma placement.** The `@[cfc_pull]` tags should move from
   `Mathlib/Tactic/CFCPull/Lemmas.lean` to the declaration sites, along with the three `rfl`
   lemmas that file adds.
-* **Side goals in `conv` mode.** `conv` cannot carry unsolved goals out of a block, so anything
-  the auto-param tactics fail to close is an error there, and neither `+defer` nor `+deferAll`
-  can help. Some `conv` tactics (`equals`) let the user prove the obligation inline; whether
-  something similar makes sense for `cfc_pull` has not been investigated.

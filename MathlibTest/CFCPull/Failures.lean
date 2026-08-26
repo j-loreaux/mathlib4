@@ -132,7 +132,8 @@ example (ha : IsStarNormal a) (f g : ℂ → ℂ) :
   cfc_pull ℂ a
 
 /- `+defer` does not help inside `conv`, which cannot end with unsolved goals — the same
-restriction that `rw` inside `conv` is subject to. -/
+restriction that `rw` inside `conv` is subject to. A `=> tac` block is what closes them there;
+see the `ConvSideGoals` section of `Examples.lean`. -/
 /--
 error: Tactic `conv` failed: There are unsolved goals
 case cfc_pull.continuity
@@ -160,8 +161,9 @@ example (ha : IsStarNormal a) (f g : ℂ → ℂ) :
     cfc f a * cfc g a + b = cfc (fun x ↦ f x * g x) a + b := by
   conv_lhs => arg 1; cfc_pull +defer ℂ a
 
-/- `+deferAll` makes `conv` strictly worse: it hands back the side goals that the discharging
-would have closed, so a `conv` pull that succeeds without it fails with it. -/
+/- `+deferAll` makes `conv` strictly worse *on its own*: it hands back the side goals that the
+discharging would have closed, so a `conv` pull that succeeds without it fails with it. It is
+useful there only together with a `=> tac` block, which is then handed the whole list. -/
 /--
 error: Tactic `conv` failed: There are unsolved goals
 case cfc_pull.predicate
@@ -187,6 +189,36 @@ error: `cfc_pull` made no progress
 #guard_msgs in
 example (ha : IsSelfAdjoint a) : a⁺ = a⁺ := by
   cfc_pull +deferAll ℝ≥0 a
+
+/- A `=> tac` block that does not close everything it was handed is an error naming what is
+left, rather than the bare `conv` complaint the same goal would have produced without a block.
+Note also what reaches the block: `hf` settles `f`'s continuity during the discharging, so only
+`g`'s is left for it — the block implies `+defer`, not `+deferAll`. -/
+/--
+error: `cfc_pull` ran the `=> ..` block, but 1 side goal is still open:
+  case cfc_pull.continuity
+  A : Type u_1
+  inst✝² : CStarAlgebra A
+  inst✝¹ : PartialOrder A
+  inst✝ : StarOrderedRing A
+  a b : A
+  ha : IsStarNormal a
+  f g : ℂ → ℂ
+  hf : ContinuousOn f (spectrum ℂ a)
+  ⊢ ContinuousOn g (spectrum ℂ a)
+A `conv` block cannot end with unsolved goals, so the `=> ..` block must close every one.
+-/
+#guard_msgs in
+example (ha : IsStarNormal a) (f g : ℂ → ℂ) (hf : ContinuousOn f (spectrum ℂ a)) :
+    cfc f a * cfc g a + b = cfc (fun x ↦ f x * g x) a + b := by
+  conv_lhs => arg 1; cfc_pull ℂ a => skip
+
+/- The block is handed the side goals and nothing else, so on a pull that left none it has no
+goal to work on. `all_goals ..` is the way to write a block that tolerates an empty list. -/
+/-- error: No goals to be solved -/
+#guard_msgs in
+example (ha : IsStarNormal a) : star a + b = cfc (fun x : ℂ ↦ star x) a + b := by
+  conv_lhs => arg 1; cfc_pull ℂ a => exact ha
 
 end Tactic
 

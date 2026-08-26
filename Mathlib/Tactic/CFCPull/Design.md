@@ -249,8 +249,10 @@ Tactic mode:
   unless `+defer` was given. `+deferAll` stops after the deduplication and hands everything
   back — the deduplication is deliberately the first step, so that it is shared by both modes.
 
-Conv mode: `Conv.getLhs`, run `pull`, `Conv.updateLhs newLhs proof`, then append the side goals —
-though `conv` refuses to end with any, so in practice they must all be discharged.
+Conv mode: `Conv.getLhs`, run `pull`, `Conv.updateLhs newLhs proof`, then append the side goals.
+`conv` refuses to end with any, so in practice they must all be discharged before the block ends,
+which is what the optional `=> tac` block is for: it implies `+defer`, takes the survivors as its
+goal list with the `conv` goal set aside, and errors on anything it leaves open.
 
 ## 4a. Two things the first design got wrong
 
