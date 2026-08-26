@@ -160,6 +160,34 @@ example (ha : IsStarNormal a) (f g : ℂ → ℂ) :
     cfc f a * cfc g a + b = cfc (fun x ↦ f x * g x) a + b := by
   conv_lhs => arg 1; cfc_pull +defer ℂ a
 
+/- `+deferAll` makes `conv` strictly worse: it hands back the side goals that the discharging
+would have closed, so a `conv` pull that succeeds without it fails with it. -/
+/--
+error: Tactic `conv` failed: There are unsolved goals
+case cfc_pull.predicate
+A : Type u_1
+inst✝² : CStarAlgebra A
+inst✝¹ : PartialOrder A
+inst✝ : StarOrderedRing A
+a b : A
+ha : IsStarNormal a
+⊢ IsStarNormal a
+-/
+#guard_msgs in
+example (ha : IsStarNormal a) : star a + b = cfc (fun x : ℂ ↦ star x) a + b := by
+  conv_lhs => arg 1; cfc_pull +deferAll ℂ a
+
+/- Nor does `+deferAll` turn a failed pull into a list of goals: it only changes what becomes of
+the side goals of a pull that succeeded. -/
+/--
+error: `cfc_pull` made no progress
+  `cfc_pull` got stuck on `a⁺`
+    (head symbol: PosPart.posPart, target: cfc over ℝ≥0 at `a`)
+-/
+#guard_msgs in
+example (ha : IsSelfAdjoint a) : a⁺ = a⁺ := by
+  cfc_pull +deferAll ℝ≥0 a
+
 end Tactic
 
 section Attribute

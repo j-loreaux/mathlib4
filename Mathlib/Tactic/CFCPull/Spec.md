@@ -83,12 +83,16 @@ conv ... => cfc_pull (config)? (R)? (a)?
     algebra). With `-unital` the tactic always produces `cfcₙ`.
   * `+defer` (default `false`). Return the side goals that could not be discharged instead of
     failing; see [§7](#7-side-goals).
+  * `+deferAll` (default `false`). Return *all* the side goals, deduplicated but otherwise
+    untouched: no `assumption`, no auto-param tactic, no discharger. Implies `+defer`; see
+    [§7](#7-side-goals).
   * `(maxDepth := n)` (default `48`), a recursion-depth guard.
 * **Discharger** (the `(disch := tac)` clause of `simp` and `fun_prop`, and written after the
   configuration items as it is there). A tactic to try on side goals nothing else closed; see
   [§7](#7-side-goals). It is not an `optConfig` item, because its value is a tactic rather than
   a term, so it is a separate syntax node and `elabCFCPullConfig` omits the corresponding field.
-  The default does nothing.
+  The default does nothing, and so does any discharger given alongside `+deferAll`, which skips
+  every attempt at a side goal.
 
 ### Behaviour on the goal
 
@@ -102,8 +106,9 @@ the result (which closes goals like `star a * a = cfc (fun x ↦ star x * x) a` 
 In `conv` mode the current `conv` target is pulled, which gives the user complete control over
 *where* the pull happens; this replaces the "pattern" idea in the original draft, at no cost in
 expressiveness and with no new syntax to learn. Note that a `conv` block cannot end with unsolved
-goals, so in `conv` mode a surviving side goal is an error and `+defer` is of no use there.
-This is not specific to `cfc_pull` — `rw` inside `conv` behaves the same way.
+goals, so in `conv` mode a surviving side goal is an error and neither `+defer` nor `+deferAll`
+is of any use there. This is not specific to `cfc_pull` — `rw` inside `conv` behaves the same
+way.
 
 ## 3. Scalar rings
 
@@ -331,8 +336,22 @@ goal. The tactic handles them as follows.
 Note that `+defer` does not switch the discharging off; it only changes what happens to the
 survivors. The reason is that "discharge the easy ones and hand me the rest" is by far the most
 useful behaviour, and it is what the messy examples in `MathlibTest/CFCPull/Examples.lean` rely
-on. If you want to see the raw side goals, `set_option trace.Tactic.cfc_pull true` reports each
-one as it is created and what became of it.
+on.
+
+`+deferAll` is the option that *does* switch it off: the deduplication still runs, and then
+every surviving goal is handed back unattempted — `assumption`, the auto-param tactics and the
+discharger are all skipped, and nothing is an error. It implies `+defer`. Two uses:
+
+* seeing what the pull actually assumed, which the trace also shows but which is easier to read
+  as a goal list;
+* proving all the obligations by one method, `cfc_pull +deferAll R a <;> tac`, where letting
+  the auto-param tactics close an arbitrary subset first would leave `tac` facing a list whose
+  contents depend on how good `fun_prop` happened to be.
+
+Deduplication is what makes the second use workable: without it, the two sides of a relation
+hand back the same `ContinuousOn` goal twice, and the shared `p a` goal (§4) is the only one
+that would be immune. `set_option trace.Tactic.cfc_pull true` remains the finer-grained view: it
+reports each side goal as it is created and what became of it.
 
 ## 8. Worked examples
 
@@ -555,6 +574,6 @@ conversions applied.
   `Mathlib/Tactic/CFCPull/Lemmas.lean` to the declaration sites, along with the three `rfl`
   lemmas that file adds.
 * **Side goals in `conv` mode.** `conv` cannot carry unsolved goals out of a block, so anything
-  the auto-param tactics fail to close is an error there, and `+defer` cannot help. Some `conv`
-  tactics (`equals`) let the user prove the obligation inline; whether something similar makes
-  sense for `cfc_pull` has not been investigated.
+  the auto-param tactics fail to close is an error there, and neither `+defer` nor `+deferAll`
+  can help. Some `conv` tactics (`equals`) let the user prove the obligation inline; whether
+  something similar makes sense for `cfc_pull` has not been investigated.

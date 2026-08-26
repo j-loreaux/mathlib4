@@ -60,6 +60,16 @@ structure Config where
   and then the standard auto-param tactics `cfc_tac`, `cfc_cont_tac` and `cfc_zero_tac`. By
   default anything left over is an error; with `+defer` it is returned as a goal instead. -/
   defer : Bool := false
+  /-- Hand back *every* side goal, discharging none of them.
+
+  Where `+defer` returns only the goals the discharging could not close, `+deferAll` switches
+  the discharging off altogether: `assumption`, the auto-param tactics and the `(disch := ..)`
+  tactic are all skipped, and every hypothesis of every lemma used comes back as a goal. This is
+  the way to see — and to handle uniformly — the obligations the pull actually incurred.
+
+  Duplicates are merged just as they are with `+defer`, so a hypothesis that both sides of a
+  relation ask for appears once. Implies `+defer`: surviving goals are never an error. -/
+  deferAll : Bool := false
   /-- The maximum recursion depth. -/
   maxDepth : Nat := 48
   /-- A tactic to try on side goals `cfc_pull` has no built-in way to prove: the ones tagged
@@ -68,7 +78,8 @@ structure Config where
   API to fall back on. Something like `∀ x ∈ spectrum R a, f x ≠ 0`.
 
   The default, `none`, does nothing, and such a goal comes straight back to the user. Set it
-  with `cfc_pull (disch := tac) ..`, as for `simp` and `fun_prop`.
+  with `cfc_pull (disch := tac) ..`, as for `simp` and `fun_prop`. `+deferAll` skips every
+  attempt at a side goal, so it makes this field inert.
 
   This field is not settable through `optConfig` — a tactic is not a term — so it is omitted
   from `elabCFCPullConfig` and filled in by `mkConfig` from the `(disch := ..)` clause. -/

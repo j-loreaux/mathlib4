@@ -67,7 +67,8 @@ tactic for the goal's kind, and finally — for the goals the calculus API has n
 pulled independently and so tend to ask for the same predicate twice.
 
 Whatever survives is an error unless `+defer` was given, in which case it is returned to be added
-to the goal list. -/
+to the goal list. With `+deferAll` no goal is attempted at all, and every one of them is
+returned; they are still merged, so that the deferred list has no repetitions in it. -/
 def postProcessSideGoals (cfg : Config) (goals : Array MVarId) : TacticM (Array MVarId) := do
   let mut out := #[]
   for g in goals do
@@ -79,6 +80,10 @@ def postProcessSideGoals (cfg : Config) (goals : Array MVarId) : TacticM (Array 
           g.assign (mkMVar g'); return true
         else return false then
       trace[Tactic.cfc_pull] "side goal `{type}` is a duplicate"
+      continue
+    if cfg.deferAll then
+      trace[Tactic.cfc_pull] "deferring `{type}` unattempted (`+deferAll`)"
+      out := out.push g
       continue
     if ← g.assumptionCore then
       trace[Tactic.cfc_pull] "{checkEmoji} closed `{type}` with `assumption`"
@@ -99,7 +104,7 @@ def postProcessSideGoals (cfg : Config) (goals : Array MVarId) : TacticM (Array 
           continue
     trace[Tactic.cfc_pull] "{crossEmoji} could not close `{type}`"
     out := out.push g
-  unless cfg.defer || out.isEmpty do
+  unless cfg.defer || cfg.deferAll || out.isEmpty do
     throwError "`cfc_pull` rewrote the goal but could not discharge \
       {out.size} side goal{if out.size == 1 then "" else "s"}:\
       {indentD (goalsToMessageData out.toList)}\n\
@@ -257,12 +262,26 @@ example (ha : IsStrictlyPositive a) :
   case cfc_pull.continuity => exact Real.continuousOn_log.mono fun x hx h ↦ ...
 ```
 
+`+deferAll` goes further and switches the discharging off entirely, so that *every* hypothesis
+the pull needed comes back as a goal — including the ones the auto-param tactics would have
+closed. Use it to see what the pull really assumed, or to discharge the obligations by one
+method of your own:
+
+```lean
+example (ha : p a) : star a * a = cfc (fun x : R ↦ star x * x) a := by
+  cfc_pull +deferAll R a <;> first | assumption | fun_prop
+```
+
 Configuration:
 
 * `+unital` / `-unital` (default `+unital`): prefer the unital calculus `cfc`, or force the
   non-unital `cfcₙ`. With `+unital` the tactic falls back to `cfcₙ` in an algebra with no unital
   functional calculus.
 * `+defer`: return the side goals that could not be discharged instead of failing.
+* `+deferAll`: return *all* the side goals, without trying to discharge any of them. Implies
+  `+defer`, and silently makes `(disch := ..)` inert — nothing is run on a side goal, the
+  discharger included. Duplicates are merged either way, so a hypothesis that both sides of a
+  relation ask for is handed back once.
 * `(disch := tac)`: run `tac` on side goals that none of the above closed. Only the goals tagged
   `cfc_pull.side` reach it — the hypotheses peculiar to an individual `@[cfc_pull]` lemma, for
   which the calculus API has no auto-param tactic. As in `simp`, the default does nothing.
@@ -277,7 +296,7 @@ example : star a * a + b = cfc (fun x : R ↦ star x * x) a + b := by
 ```
 
 A `conv` block cannot end with unsolved goals — the same restriction that `rw` inside `conv` is
-subject to — so `+defer` is of no use there.
+subject to — so neither `+defer` nor `+deferAll` is of any use there.
 
 Going under a binder is `conv`'s job rather than the tactic's, which makes sums and the like a
 two-step affair:

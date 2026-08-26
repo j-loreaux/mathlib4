@@ -137,6 +137,35 @@ example (ha : IsStrictlyPositive a) :
   case cfc_pull.continuity =>
     exact Real.continuousOn_log.mono fun x hx h ↦ spectrum.zero_notMem ℝ ha.2 (h ▸ hx)
 
+/-! ### Side goals nobody tried to discharge
+
+`+deferAll` switches the discharging off: every side goal is reported as deferred unattempted
+and handed back. Deduplication still runs — it comes first, before any attempt — which is why
+`cfc_mul`'s two identical continuity hypotheses still produce one goal here, and why the trace
+below ends in a `is a duplicate` line rather than a second `unattempted` one. -/
+
+/--
+trace: [Tactic.cfc_pull] predicate for cfc over ℝ is IsSelfAdjoint
+[Tactic.cfc_pull] ✅️ pull CFC.log a * CFC.log a into a cfc over ℝ
+  [Tactic.cfc_pull] candidates: [cfc_mul, cfcₙ_mul]
+  [Tactic.cfc_pull] ✅️ pull CFC.log a into a cfc over ℝ
+    [Tactic.cfc_pull] candidates: [CFC.log_def]
+  [Tactic.cfc_pull] ✅️ pull CFC.log a into a cfc over ℝ
+    [Tactic.cfc_pull] candidates: [CFC.log_def]
+  [Tactic.cfc_pull] `cfc_mul`: deferred `ContinuousOn Real.log (spectrum ℝ a)`
+  [Tactic.cfc_pull] `cfc_mul`: deferred `ContinuousOn Real.log (spectrum ℝ a)`
+[Tactic.cfc_pull] predicate for cfc over ℝ is IsSelfAdjoint
+[Tactic.cfc_pull] ✅️ pull cfc (fun x => Real.log x * Real.log x) a into a cfc over ℝ
+[Tactic.cfc_pull] deferring `ContinuousOn Real.log (spectrum ℝ a)` unattempted (`+deferAll`)
+[Tactic.cfc_pull] side goal `ContinuousOn Real.log (spectrum ℝ a)` is a duplicate
+-/
+#guard_msgs in
+set_option trace.Tactic.cfc_pull true in
+example (ha : IsStrictlyPositive a) :
+    CFC.log a * CFC.log a = cfc (fun x : ℝ ↦ Real.log x * Real.log x) a := by
+  cfc_pull +deferAll ℝ a
+  exact Real.continuousOn_log.mono fun x hx h ↦ spectrum.zero_notMem ℝ ha.2 (h ▸ hx)
+
 /-! ### A failure
 
 When the tactic gets stuck, the trace is the way to find out why. `💥️` marks the node that

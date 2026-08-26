@@ -227,6 +227,7 @@ synthetic-opaque one of the same type and assigns the natural one to it.)
 structure Config where
   unital   : Bool := true    -- prefer the unital calculus
   defer    : Bool := false   -- hand back undischarged side goals instead of failing
+  deferAll : Bool := false   -- hand back every side goal, discharging none
   maxDepth : Nat  := 48
 declare_config_elab elabConfig Config
 ```
@@ -245,7 +246,8 @@ Tactic mode:
   `mkEqMPR`, and `try rfl` on the new one;
 * post-process the side goals (deduplicate, `assumption`, then the auto-param tactic for the
   goal's kind, which is recovered from the name the goal was given), erroring on the survivors
-  unless `+defer` was given.
+  unless `+defer` was given. `+deferAll` stops after the deduplication and hands everything
+  back — the deduplication is deliberately the first step, so that it is shared by both modes.
 
 Conv mode: `Conv.getLhs`, run `pull`, `Conv.updateLhs newLhs proof`, then append the side goals —
 though `conv` refuses to end with any, so in practice they must all be discharged.

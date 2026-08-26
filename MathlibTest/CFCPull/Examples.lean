@@ -27,7 +27,8 @@ expression with `cfc`/`cfcₙ` pulled to the head, and proves it with `cfc_pull`
 two functions agree — and discharges the hypotheses of the lemmas it used with `assumption` and
 the standard auto-param tactics `cfc_tac`, `cfc_cont_tac` and `cfc_zero_tac`. Anything it cannot
 close is an error unless `+defer` is given, in which case it becomes a goal named after its kind
-(`cfc_pull.continuity`, `cfc_pull.predicate`, `cfc_pull.mapZero`, `cfc_pull.side`).
+(`cfc_pull.continuity`, `cfc_pull.predicate`, `cfc_pull.mapZero`, `cfc_pull.side`). `+deferAll`
+skips the discharging altogether and hands back every side goal, deduplicated.
 
 Examples that `cfc_pull` deliberately does *not* finish are marked as such; in every case what is
 left over is either an honest side condition or an equality of functions that has to be settled
@@ -331,6 +332,64 @@ example (ha : IsSelfAdjoint a) (f : ℝ → ℝ) (hf : Continuous f)
   case cfc_pull.side => exact fun x hx ↦ hf0 x (hspec hx)
 
 end MessySideGoals
+
+section DeferAll
+
+/-! ## `+deferAll`: every side goal, discharged by hand
+
+`+defer` returns only the goals the discharging could not close, so what comes back depends on
+how far `fun_prop` and `cfc_tac` happened to get. `+deferAll` switches the discharging off
+instead — no `assumption`, no auto-param tactic, no `(disch := ..)` — so the goal list is exactly
+the hypotheses of the lemmas the pull used. Deduplication still runs first, and that is what
+makes `cfc_pull +deferAll .. <;> tac` a sensible thing to write. -/
+
+variable {R A : Type*} {p : A → Prop} [CommSemiring R]
+  [StarRing R] [MetricSpace R] [IsTopologicalSemiring R] [ContinuousStar R] [Ring A]
+  [StarRing A] [TopologicalSpace A] [Algebra R A] [ContinuousFunctionalCalculus R A p]
+  [ContinuousMap.UniqueHom R A] {a : A}
+
+/- Plain `cfc_pull R a` closes this outright (it is the first example in the file). With
+`+deferAll` the three hypotheses it would have used come back instead: the shared predicate
+goal `p a`, asked for by `cfc_star_id` and by `cfc_id'`, and the two continuity hypotheses of
+`cfc_mul`. -/
+example (ha : p a) : star a * a = cfc (fun x : R ↦ star x * x) a := by
+  cfc_pull +deferAll R a <;> first | assumption | fun_prop
+
+/- The goals are named after their kind, exactly as with `+defer`. -/
+example (ha : p a) : star a * a = cfc (fun x : R ↦ star x * x) a := by
+  cfc_pull +deferAll R a
+  case cfc_pull.predicate => exact ha
+  all_goals fun_prop
+
+end DeferAll
+
+section DeferAllCStar
+
+variable {A : Type*} [CStarAlgebra A] [PartialOrder A] [StarOrderedRing A]
+variable {a : A}
+
+/- Deduplication is what keeps the list short: `cfc_mul` asks for the continuity of `Real.log`
+once per factor, and one goal comes back, not two. Compare the `+defer` version of this example
+in `MessySideGoals` above — there the deduplication is invisible, because the auto-param tactic
+had already failed on both copies. -/
+example (ha : IsStrictlyPositive a) :
+    CFC.log a * CFC.log a = cfc (fun x : ℝ ↦ Real.log x * Real.log x) a := by
+  cfc_pull +deferAll ℝ a
+  exact Real.continuousOn_log.mono fun x hx h ↦ spectrum.zero_notMem ℝ ha.2 (h ▸ hx)
+
+/- `(disch := ..)` is inert under `+deferAll`: nothing at all is run on a side goal, the
+discharger included. This is the `cfc_pull.side` example from `MessySideGoals` above, where the
+discharger does close the goal when `+deferAll` is absent; here the same discharger is given and
+the goal still comes back, so the `case cfc_pull.side` below is what proves it. -/
+example (ha : IsSelfAdjoint a) (f : ℝ → ℝ) (hf : Continuous f)
+    (hspec : spectrum ℝ a ⊆ Set.Icc (-1) 1) (hf0 : ∀ x ∈ Set.Icc (-1 : ℝ) 1, f x ≠ 0) :
+    Ring.inverse (cfc f a) = cfc (fun x : ℝ ↦ (f x)⁻¹) a := by
+  cfc_pull +deferAll (disch := exact fun x hx ↦ hf0 x (hspec hx)) ℝ a
+  case cfc_pull.side => exact fun x hx ↦ hf0 x (hspec hx)
+  case cfc_pull.predicate => exact ha
+  case cfc_pull.continuity => fun_prop
+
+end DeferAllCStar
 
 section RealTheorems
 
