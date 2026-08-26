@@ -328,8 +328,10 @@ the spectrum, which here takes a hypothesis about the spectrum's location. -/
 example (ha : IsSelfAdjoint a) (f : ℝ → ℝ) (hf : Continuous f)
     (hspec : spectrum ℝ a ⊆ Set.Icc (-1) 1) (hf0 : ∀ x ∈ Set.Icc (-1 : ℝ) 1, f x ≠ 0) :
     Ring.inverse (cfc f a) = cfc (fun x : ℝ ↦ (f x)⁻¹) a := by
-  cfc_pull +defer ℝ a
+  cfc_pull +deferAll ℝ a
   case cfc_pull.side => exact fun x hx ↦ hf0 x (hspec hx)
+  case cfc_pull.predicate => exact ha
+  case cfc_pull.continuity => fun_prop
 
 end MessySideGoals
 
