@@ -213,6 +213,24 @@ example (ha : IsStarNormal a) (f g : ℂ → ℂ) (hf : ContinuousOn f (spectrum
     cfc f a * cfc g a + b = cfc (fun x ↦ f x * g x) a + b := by
   conv_lhs => arg 1; cfc_pull ℂ a => skip
 
+/- A local definition is an atom by default, so the pull stops at one. The head symbol is `_`,
+as it is for any free variable, so the message names `+zetaDelta` rather than leaving the user
+with nothing to go on. -/
+/--
+error: `cfc_pull` made no progress
+  `cfc_pull` got stuck on `d`
+    (head symbol: _, target: cfc over ℂ at `a`)
+  `d` is a local definition, and `cfc_pull` does not look
+  at what it stands for. Unfold it with `cfc_pull +zetaDelta ..`, or rewrite it away
+  first — `set .. with h` hands you the equation `h` to do it with.
+-/
+#guard_msgs in
+example (ha : IsStarNormal a) : True := by
+  let d : A := star a * a
+  have : d = cfc (fun x : ℂ ↦ star x * x) a := by
+    cfc_pull ℂ a
+  trivial
+
 /- The block is handed the side goals and nothing else, so on a pull that left none it has no
 goal to work on. `all_goals ..` is the way to write a block that tolerates an empty list. -/
 /-- error: No goals to be solved -/

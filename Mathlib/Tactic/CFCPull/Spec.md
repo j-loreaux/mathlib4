@@ -86,6 +86,10 @@ conv ... => cfc_pull (config)? (R)? (a)? (=> tac)?
   * `+deferAll` (default `false`). Return *all* the side goals, deduplicated but otherwise
     untouched: no `assumption`, no auto-param tactic, no discharger. Implies `+defer`; see
     [§7](#7-side-goals).
+  * `+zetaDelta` (default `false`). Unfold `let`-bound local variables to their values. Off by
+    default, so a local definition — written with `let`, or introduced by `set` — is an atom:
+    the tactic does not look at what it stands for, and a pull that reaches one gets stuck
+    there, with an error naming this flag. See [§7a](#7a-let-bound-variables).
   * `(maxDepth := n)` (default `48`), a recursion-depth guard.
 * **Discharger** (the `(disch := tac)` clause of `simp` and `fun_prop`, and written after the
   configuration items as it is there). A tactic to try on side goals nothing else closed; see
@@ -380,6 +384,27 @@ none of them open — what survives is an error naming the goals.
 
 The block is `conv`-only. In tactic mode the tactic that follows `cfc_pull` already does this
 job, and there is nothing for a dedicated syntax to add.
+
+## 7a. `let`-bound variables
+
+A local definition — `let b : A := star a * a`, or the `b` that `set b := star a * a with hb`
+introduces — is **an atom** by default: `cfc_pull` does not look at its value, so a pull that
+reaches one gets stuck there and says so, naming `+zetaDelta`.
+
+This is the `zetaDelta` flag of `Meta.Config` rather than the transparency (§ the `Core.lean`
+module docstring); it is ambiently `true`, and `runPull` sets it to `Config.zetaDelta` around
+the recursion, which covers the `DiscrTree` lookup that chooses the candidate lemmas as well.
+
+The default is `false` for the reason `simp` chose the same default: `set b := e with hb` is a
+request to stop reading `e`, and unfolding it silently would undo the abstraction and leave `hb`
+attached to nothing. Two ways in when you do want it:
+
+* `cfc_pull +zetaDelta ..`, which unfolds local definitions transitively, nested ones included;
+* `rw [hb]` first, using the equation `set` hands you.
+
+The *element* is a separate question and needs no flag. It is matched against the term the user
+supplied, so an element given as a `let`-bound variable is matched as written and comes back as
+written: `cfc_pull ℂ c` with `c : A := a` produces `cfc f c`, not `cfc f a`.
 
 ## 8. Worked examples
 

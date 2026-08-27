@@ -36,6 +36,14 @@ both at default transparency:
 its `isDefEq` calls all run under `withNewMCtxDepth` and relate two parts of a single tagged
 lemma's statement to each other.
 
+Unfolding a `let`-bound local to its value is governed not by the transparency but by the
+separate `zetaDelta` flag of `Meta.Config`, which is ambiently `true`. `runPull` sets it from
+`Config.zetaDelta`, whose default is `false`: a local definition is an atom, matching `rw` — and
+`simp`, which defaults the same way — rather than being silently transparent to the whole pull.
+The setting covers the recursion, and so the `DiscrTree` lookup that chooses the candidates as
+well; the typing and instance questions above it are left at the ambient configuration, for the
+reasons just given.
+
 See `Mathlib/Tactic/CFCPull/Spec.md` for the specification, and `Design.md` for a guide to this
 file.
 -/
@@ -70,6 +78,21 @@ structure Config where
   Duplicates are merged just as they are with `+defer`, so a hypothesis that both sides of a
   relation ask for appears once. Implies `+defer`: surviving goals are never an error. -/
   deferAll : Bool := false
+  /-- Look through `let`-bound local variables, unfolding them to their values.
+
+  Off by default, so a local definition — whether written with `let` or introduced by `set` — is
+  an **atom**: the tactic does not look at what it stands for, and a pull that reaches one gets
+  stuck there. This is `simp`'s default too, and for the same reason: `set b := star a * a with
+  hb` is a request to stop reading `star a * a`, and silently unfolding it would undo the
+  abstraction and strand `hb`.
+
+  With `+zetaDelta` the values are unfolded and such a term is pulled on its structure. The
+  other way in is to rewrite by hand first, with the equation `set` hands you: `rw [hb]`.
+
+  Note that this is about the *definitions* of local variables, not about the element: an
+  element given as a `let`-bound variable is matched as written, and comes back as written, with
+  no need for this flag. -/
+  zetaDelta : Bool := false
   /-- The maximum recursion depth. -/
   maxDepth : Nat := 48
   /-- A tactic to try on side goals `cfc_pull` has no built-in way to prove: the ones tagged
@@ -616,6 +639,15 @@ partial def pull (e : Expr) (want : Mode) : PullM Result := withIncDepth do
       if let some r := r then return r
     let mut msg := m!"`cfc_pull` got stuck on `{e}`{indentD m!"(head symbol: \
       {e.getAppFn.constName?.getD `_}, target: {want} at `{ctx.elem}`)"}"
+    /- A local definition is an atom unless `+zetaDelta` is given, so a pull that reaches one
+    stops dead with nothing to say about it: the head symbol printed above is `_`, as it is for
+    any free variable, which on its own tells the user nothing. Name the flag instead. -/
+    if !ctx.cfg.zetaDelta then
+      if let .fvar fvarId := e.getAppFn then
+        if (← fvarId.getDecl).isLet then
+          msg := msg ++ m!"\n`{e.getAppFn}` is a local definition, and `cfc_pull` does not look\n\
+            at what it stands for. Unfold it with `cfc_pull +zetaDelta ..`, or rewrite it away\n\
+            first — `set .. with h` hands you the equation `h` to do it with."
     /- The one failure worth spelling out: `e` is already an application of the calculus, just
     to the wrong element. `cfc_pull` only ever rewrites the calculus at a *more* complicated
     element into the calculus at a simpler one, so this is a dead end, and it usually means the
@@ -727,9 +759,17 @@ def runPull (cfg : Config) (R elem e : Expr) : MetaM (Expr × Expr × Array MVar
   let ctx : Context := { cfg, elem, alg, target, lemmas }
   -- Compute the predicate up front, so that "there is no such functional calculus" is reported
   -- as itself rather than as a pile of failed lemma applications.
+  /- `zetaDelta` governs whether `isDefEq` and `whnf` — and so also the `DiscrTree` lookup that
+  chooses the candidate lemmas — unfold a `let`-bound local to its value. It is `true` ambiently,
+  which would make a local definition transparent to the whole pull; the default here is `false`,
+  so that such a variable is an atom unless `+zetaDelta` asks otherwise. It is set around the
+  recursion only, leaving the typing and instance questions above at the ambient configuration,
+  for the same reason those are exempt from the reducible transparency (see the module
+  docstring). -/
   let (res, st) ←
     try
-      ((do let _ ← getPredicate target; pull e target).run ctx).run {}
+      withConfig (fun c => { c with zetaDelta := cfg.zetaDelta }) <|
+        ((do let _ ← getPredicate target; pull e target).run ctx).run {}
     catch ex =>
       if let .internal id _ := ex then
         if id == maxDepthExceptionId then

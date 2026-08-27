@@ -285,6 +285,12 @@ Configuration:
 * `(disch := tac)`: run `tac` on side goals that none of the above closed. Only the goals tagged
   `cfc_pull.side` reach it — the hypotheses peculiar to an individual `@[cfc_pull]` lemma, for
   which the calculus API has no auto-param tactic. As in `simp`, the default does nothing.
+* `+zetaDelta`: unfold `let`-bound local variables. Off by default, so a local definition —
+  written with `let`, or introduced by `set` — is an atom that the tactic does not look inside,
+  and a pull reaching one gets stuck there. This is `simp`'s default too: `set b := star a * a
+  with hb` is a request to stop reading `star a * a`, and unfolding it silently would undo the
+  abstraction and strand `hb`. `rw [hb]` is the other way in. The *element* is unaffected —
+  given as a `let`-bound variable it is matched, and returned, as written.
 * `(maxDepth := n)`: the recursion depth limit.
 
 In `conv` mode, `cfc_pull` acts on the current `conv` target, which is the way to pull at a

@@ -450,6 +450,52 @@ example (ha : IsStrictlyPositive a) (b : A) :
 
 end ConvSideGoals
 
+section LetBound
+
+/-! ## `let`-bound variables and `+zetaDelta`
+
+A local definition is an atom: `cfc_pull` does not look at what it stands for. The default is
+`false` for the reason `simp` chose the same one — `set b := e with hb` is a request to stop
+reading `e`, and unfolding it silently would undo the abstraction and strand `hb`. -/
+
+variable {A : Type*} [CStarAlgebra A] {a : A}
+
+/- With `+zetaDelta` the definition is unfolded and the pull proceeds on its structure. -/
+example (ha : IsStarNormal a) : True := by
+  let b : A := star a * a
+  have : b = cfc (fun x : ℂ ↦ star x * x) a := by
+    cfc_pull +zetaDelta ℂ a
+  trivial
+
+/- Transitively, through nested definitions. -/
+example (ha : IsStarNormal a) : True := by
+  let u : A := star a
+  let v : A := u * a
+  have : v = cfc (fun x : ℂ ↦ star x * x) a := by
+    cfc_pull +zetaDelta ℂ a
+  trivial
+
+/- The other way in, and the reason the default is what it is: `set` hands you the equation, so
+you decide when the abstraction is opened rather than the tactic deciding for you. -/
+example (ha : IsStarNormal a) : True := by
+  have : star a * a = cfc (fun x : ℂ ↦ star x * x) a := by
+    set b := star a * a with hb
+    rw [hb]
+    cfc_pull ℂ a
+  trivial
+
+/- The *element* is a separate question and needs no flag: it is matched against the term the
+user supplied, so a `let`-bound element is matched as written and comes back as written — note
+the `c` rather than `a` on the right. -/
+example (ha : IsStarNormal a) : True := by
+  let c : A := a
+  have hc : IsStarNormal c := ha
+  have : star c * c = cfc (fun x : ℂ ↦ star x * x) c := by
+    cfc_pull ℂ c
+  trivial
+
+end LetBound
+
 section RealTheorems
 
 /-! ## `cfc_pull` followed by `cfc_congr`
