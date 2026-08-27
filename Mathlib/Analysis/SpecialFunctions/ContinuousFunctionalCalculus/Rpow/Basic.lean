@@ -108,16 +108,14 @@ lemma nnrpow_def {a : A} {y : ℝ≥0} : a ^ y = cfcₙ (NNReal.nnrpow · y) a :
 
 lemma nnrpow_eq_cfcₙ_real [T2Space A] [IsSemitopologicalRing A] (a : A)
     (y : ℝ≥0) (ha : 0 ≤ a := by cfc_tac) : a ^ y = cfcₙ (fun x : ℝ => x ^ (y : ℝ)) a := by
-  rw [nnrpow_def, cfcₙ_nnreal_eq_real ..]
-  refine cfcₙ_congr ?_
-  intro x hx
+  cfc_pull ℝ a
+  refine cfcₙ_congr fun x hx ↦ ?_
   have : 0 ≤ x := by grind
   simp [this]
 
 lemma nnrpow_add {a : A} {x y : ℝ≥0} (hx : 0 < x) (hy : 0 < y) :
     a ^ (x + y) = a ^ x * a ^ y := by
-  simp only [nnrpow_def]
-  rw [← cfcₙ_mul _ _ a]
+  cfc_pull ℝ≥0 a
   congr! 2 with z
   exact mod_cast z.rpow_add' <| ne_of_gt (add_pos hx hy)
 
@@ -126,22 +124,19 @@ lemma nnrpow_zero {a : A} : a ^ (0 : ℝ≥0) = 0 := by
   simp [nnrpow_def, cfcₙ_apply_of_not_map_zero]
 
 lemma nnrpow_one (a : A) (ha : 0 ≤ a := by cfc_tac) : a ^ (1 : ℝ≥0) = a := by
-  simp only [nnrpow_def, NNReal.nnrpow_def, NNReal.coe_one, NNReal.rpow_one]
-  change cfcₙ (id : ℝ≥0 → ℝ≥0) a = a
-  rw [cfcₙ_id ℝ≥0 a]
+  cfc_pull ℝ≥0 a
+  simp [NNReal.nnrpow_def]
 
 lemma nnrpow_one_eqOn : (Set.Ici (0 : A)).EqOn (fun a : A => a ^ (1 : ℝ≥0)) id :=
   fun _ ha => CFC.nnrpow_one _ ha
 
 lemma nnrpow_two (a : A) (ha : 0 ≤ a := by cfc_tac) : a ^ (2 : ℝ≥0) = a * a := by
-  simp only [nnrpow_def, NNReal.nnrpow_def, NNReal.coe_ofNat, NNReal.rpow_ofNat, pow_two]
-  change cfcₙ (fun z : ℝ≥0 => id z * id z) a = a * a
-  rw [cfcₙ_mul id id a, cfcₙ_id ℝ≥0 a]
+  cfc_pull ℝ≥0 a
+  simp only [NNReal.nnrpow_def, NNReal.coe_ofNat, NNReal.rpow_ofNat, pow_two]
 
 lemma nnrpow_three (a : A) (ha : 0 ≤ a := by cfc_tac) : a ^ (3 : ℝ≥0) = a * a * a := by
-  simp only [nnrpow_def, NNReal.nnrpow_def, NNReal.coe_ofNat, NNReal.rpow_ofNat, pow_three]
-  change cfcₙ (fun z : ℝ≥0 => id z * (id z * id z)) a = a * a * a
-  rw [cfcₙ_mul id _ a, cfcₙ_mul id _ a, ← mul_assoc, cfcₙ_id ℝ≥0 a]
+  cfc_pull ℝ≥0 a
+  simp only [NNReal.nnrpow_def, NNReal.coe_ofNat, NNReal.rpow_ofNat, pow_three]
 
 @[simp]
 lemma zero_nnrpow {x : ℝ≥0} : (0 : A) ^ x = 0 := by simp [nnrpow_def]
@@ -156,8 +151,7 @@ lemma nnrpow_nnrpow {a : A} {x y : ℝ≥0} : (a ^ x) ^ y = a ^ (x * y) := by
   case pos =>
     obtain (rfl | hx) := eq_zero_or_pos x <;> obtain (rfl | hy) := eq_zero_or_pos y
     all_goals try simp
-    simp only [nnrpow_def]
-    rw [← cfcₙ_comp _ _ a]
+    cfc_pull ℝ≥0 a
     congr! 2 with u
     ext
     simp [Real.rpow_mul]
