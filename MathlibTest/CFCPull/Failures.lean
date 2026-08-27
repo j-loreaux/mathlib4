@@ -9,6 +9,8 @@ public import Mathlib.Tactic.CFCPull
 public import Mathlib.Analysis.CStarAlgebra.Classes
 public import Mathlib.Analysis.CStarAlgebra.ContinuousFunctionalCalculus.Isometric
 public import Mathlib.Analysis.CStarAlgebra.ContinuousFunctionalCalculus.Order
+public import Mathlib.Analysis.CStarAlgebra.ContinuousFunctionalCalculus.Pi
+public import Mathlib.Analysis.CStarAlgebra.ContinuousFunctionalCalculus.RealImaginaryPart
 public import Mathlib.Analysis.SpecialFunctions.ContinuousFunctionalCalculus.PosPart.Basic
 
 /-!
@@ -305,6 +307,49 @@ theorem cfcPullTest.ringAndUnitality {A : Type*} [CStarAlgebra A] {a : A} (f : �
   rw [cfcₙ_eq_cfc, cfc_real_eq_complex]
 
 end BothChange
+
+section RingAndElement
+
+/- `cfc_comp_re` and its three siblings change the scalar ring *and* the element. The `Scalar`
+category cannot express that — `convert` applies a scalar lemma expecting the element to survive
+— and the `Compose` category cannot either, since it is indexed at a single ring. So they are
+rejected rather than silently entered as a bogus `ℂ → ℝ` conversion edge. -/
+
+/--
+error: @[cfc_pull] failed: `cfc_comp_re` changes both the scalar ring and the
+element of the functional calculus; such lemmas are not supported. A scalar
+conversion must leave the element alone, and a composition must leave the scalar
+ring alone.
+-/
+#guard_msgs in
+attribute [cfc_pull] cfc_comp_re
+
+end RingAndElement
+
+section UndeterminedVariable
+
+/- A tagged lemma is rejected at *use* time, not at tagging time, when its statement leaves one of
+its variables undetermined. `cfc_map_prod`'s auxiliary scalar ring `S` occurs only in its
+hypotheses and instance arguments, so the lemma enters the database but can never be applied;
+this is why it and `cfcₙ_map_prod` are left untagged in Mathlib. `set_option
+trace.Tactic.cfc_pull true` reports the reason: the instance argument `CommRing ?S` is not
+determined. -/
+
+variable {A B : Type*} [CStarAlgebra A] [CStarAlgebra B] {a : A} {b : B}
+
+attribute [local cfc_pull] cfc_map_prod
+
+/--
+error: `cfc_pull` made no progress
+  `cfc_pull` got stuck on `(cfc f a, cfc f b)`
+    (head symbol: Prod.mk, target: cfc over ℂ at `(a, b)`)
+-/
+#guard_msgs in
+example (f : ℂ → ℂ) (hab : IsStarNormal (a, b)) :
+    (cfc f a, cfc f b) = cfc f (a, b) := by
+  cfc_pull ℂ (a, b)
+
+end UndeterminedVariable
 
 section BoundHoles
 

@@ -21,6 +21,7 @@ section NonUnital
 variable [NonUnitalRing A] [StarRing A] [Module ℂ A] [IsScalarTower ℂ A A] [SMulCommClass ℂ A A]
   [StarModule ℂ A] [NonUnitalContinuousFunctionalCalculus ℂ A IsStarNormal]
 
+@[cfc_pull]
 lemma cfcₙ_re_id (a : A) (ha : IsStarNormal a := by cfc_tac) :
     cfcₙ (re · : ℂ → ℂ) a = ℜ a := by
   conv_rhs => rw [realPart_apply_coe]; cfc_pull ℂ a
@@ -28,6 +29,7 @@ lemma cfcₙ_re_id (a : A) (ha : IsStarNormal a := by cfc_tac) :
   rw [Complex.re_eq_add_conj, ← smul_one_smul ℂ 2⁻¹]
   simp [div_eq_inv_mul]
 
+@[cfc_pull]
 lemma cfcₙ_im_id (a : A) (ha : IsStarNormal a := by cfc_tac) :
     cfcₙ (im · : ℂ → ℂ) a = ℑ a := by
   suffices cfcₙ (fun z : ℂ ↦ re z + I * im z) a = ℜ a + I • ℑ a by
@@ -55,6 +57,7 @@ lemma quasispectrum_imaginaryPart' (a : A) (ha : IsStarNormal a := by cfc_tac) :
 
 variable [ContinuousMapZero.UniqueHom ℂ A]
 
+@[cfc_pull]
 lemma cfcₙ_realPart (f : ℂ → ℂ) (a : A)
     (hf : ContinuousOn f (quasispectrum ℂ (ℜ a : A)) := by cfc_cont_tac)
     (hf0 : f 0 = 0 := by cfc_zero_tac) (ha : IsStarNormal a := by cfc_tac) :
@@ -62,6 +65,7 @@ lemma cfcₙ_realPart (f : ℂ → ℂ) (a : A)
   rw [quasispectrum_realPart a] at hf
   rw [← cfcₙ_re_id a, ← cfcₙ_comp' ..]
 
+@[cfc_pull]
 lemma cfcₙ_imaginaryPart (f : ℂ → ℂ) (a : A)
     (hf : ContinuousOn f (quasispectrum ℂ (ℑ a : A)) := by cfc_cont_tac)
     (hf0 : f 0 = 0 := by cfc_zero_tac) (ha : IsStarNormal a := by cfc_tac) :
@@ -71,6 +75,13 @@ lemma cfcₙ_imaginaryPart (f : ℂ → ℂ) (a : A)
 
 variable [T2Space A]
 
+/- The four `comp_re`/`comp_im` lemmas below are deliberately *not* tagged `@[cfc_pull]`. They
+change the scalar ring (`ℝ` on the side with the structured element `ℜ a`, `ℂ` on the side with
+the element `a`) *and* the element, and the `@[cfc_pull]` attribute classifies any lemma whose two
+sides disagree about the scalar ring as a `Scalar` conversion, without looking at the elements.
+Tagging them would therefore add a bogus `ℂ → ℝ` edge to the conversion graph, along which
+`cfc_pull` would happily "convert" a result at `a` into one at `ℜ a`. Supporting them needs a
+`Compose` category that is allowed to change the ring; see `Mathlib/Tactic/CFCPull/Spec.md` §11. -/
 lemma cfcₙ_comp_re (f : ℝ → ℝ) (a : A)
     (hf : ContinuousOn f (quasispectrum ℝ (ℜ a : A)) := by cfc_cont_tac)
     (hf0 : f 0 = 0 := by cfc_zero_tac) (ha : IsStarNormal a := by cfc_tac) :
@@ -102,6 +113,7 @@ section Unital
 variable [Ring A] [StarRing A] [Algebra ℂ A] [StarModule ℂ A]
   [ContinuousFunctionalCalculus ℂ A IsStarNormal]
 
+@[cfc_pull]
 lemma cfc_re_id (a : A) (hp : IsStarNormal a := by cfc_tac) :
     cfc (re · : ℂ → ℂ) a = ℜ a := by
   conv_rhs => rw [realPart_apply_coe]; cfc_pull ℂ a
@@ -109,6 +121,7 @@ lemma cfc_re_id (a : A) (hp : IsStarNormal a := by cfc_tac) :
   rw [Complex.re_eq_add_conj, ← smul_one_smul ℂ 2⁻¹]
   simp [div_eq_inv_mul]
 
+@[cfc_pull]
 lemma cfc_im_id (a : A) (hp : IsStarNormal a := by cfc_tac) :
     cfc (im · : ℂ → ℂ) a = ℑ a := by
   suffices cfc (fun z : ℂ ↦ re z + I * im z) a = ℜ a + I • ℑ a by
@@ -134,12 +147,14 @@ lemma spectrum_imaginaryPart' (a : A) (ha : IsStarNormal a := by cfc_tac) :
 
 variable [ContinuousMap.UniqueHom ℂ A]
 
+@[cfc_pull]
 lemma cfc_realPart (f : ℂ → ℂ) (a : A) (hf : ContinuousOn f (spectrum ℂ (ℜ a : A)) := by cfc_tac)
     (ha : IsStarNormal a := by cfc_tac) :
     cfc f (ℜ a : A) = cfc (fun x ↦ f (re x)) a := by
   rw [spectrum_realPart a] at hf
   rw [← cfc_re_id a, ← cfc_comp' ..]
 
+@[cfc_pull]
 lemma cfc_imaginaryPart (f : ℂ → ℂ) (a : A)
     (hf : ContinuousOn f (spectrum ℂ (ℑ a : A)) := by cfc_tac)
     (ha : IsStarNormal a := by cfc_tac) :
@@ -149,6 +164,13 @@ lemma cfc_imaginaryPart (f : ℂ → ℂ) (a : A)
 
 variable [T2Space A]
 
+/- The four `comp_re`/`comp_im` lemmas below are deliberately *not* tagged `@[cfc_pull]`. They
+change the scalar ring (`ℝ` on the side with the structured element `ℜ a`, `ℂ` on the side with
+the element `a`) *and* the element, and the `@[cfc_pull]` attribute classifies any lemma whose two
+sides disagree about the scalar ring as a `Scalar` conversion, without looking at the elements.
+Tagging them would therefore add a bogus `ℂ → ℝ` edge to the conversion graph, along which
+`cfc_pull` would happily "convert" a result at `a` into one at `ℜ a`. Supporting them needs a
+`Compose` category that is allowed to change the ring; see `Mathlib/Tactic/CFCPull/Spec.md` §11. -/
 lemma cfc_comp_re (f : ℝ → ℝ) (a : A)
     (hf : ContinuousOn f (spectrum ℝ (ℜ a : A)) := by cfc_tac)
     (ha : IsStarNormal a := by cfc_tac) :

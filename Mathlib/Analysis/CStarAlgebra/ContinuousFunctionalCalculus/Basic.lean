@@ -469,12 +469,14 @@ lemma Unitization.cfcₙ_eq_cfc_inr {R : Type*} [Semifield R] [StarRing R] [Metr
     · rw [cfcₙ_apply_of_not_predicate a ha, inr_zero,
         cfc_apply_of_not_predicate _ (not_iff_not.mpr hp |>.mpr ha)]
 
+@[cfc_pull]
 lemma Unitization.complex_cfcₙ_eq_cfc_inr (a : A) (f : ℂ → ℂ) (hf₀ : f 0 = 0 := by cfc_zero_tac) :
     cfcₙ f a = cfc f (a : A⁺¹) :=
   Unitization.cfcₙ_eq_cfc_inr isStarNormal_inr ..
 
 /-- note: the version for `ℝ≥0`, `Unitization.nnreal_cfcₙ_eq_cfc_inr`, can be found in
 `Mathlib/Analysis/CStarAlgebra/ContinuousFunctionalCalculus/Order.lean` -/
+@[cfc_pull]
 lemma Unitization.real_cfcₙ_eq_cfc_inr (a : A) (f : ℝ → ℝ) (hf₀ : f 0 = 0 := by cfc_zero_tac) :
     cfcₙ f a = cfc f (a : A⁺¹) :=
   Unitization.cfcₙ_eq_cfc_inr isSelfAdjoint_inr ..

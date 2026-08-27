@@ -272,6 +272,7 @@ variable [StarModule 𝕜 A] [StarModule ℝ A] [IsScalarTower ℝ 𝕜 A] in
 lemma abs_algebraMap (c : 𝕜) : abs (algebraMap 𝕜 A c) = algebraMap ℝ A ‖c‖ := by
   simp [Algebra.algebraMap_eq_smul_one]
 
+@[cfc_pull]
 lemma _root_.cfc_comp_norm (f : 𝕜 → 𝕜) (a : A) (ha : p a := by cfc_tac)
     (hf : ContinuousOn f ((fun z ↦ (‖z‖ : 𝕜)) '' spectrum 𝕜 a) := by cfc_cont_tac) :
     cfc (f ‖·‖) a = cfc f (abs a) := by

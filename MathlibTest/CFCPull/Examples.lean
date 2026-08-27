@@ -9,6 +9,8 @@ public import Mathlib.Tactic.CFCPull
 public import Mathlib.Analysis.CStarAlgebra.Classes
 public import Mathlib.Analysis.CStarAlgebra.ContinuousFunctionalCalculus.Isometric
 public import Mathlib.Analysis.CStarAlgebra.ContinuousFunctionalCalculus.Order
+public import Mathlib.Analysis.CStarAlgebra.ContinuousFunctionalCalculus.RealImaginaryPart
+public import Mathlib.Analysis.Matrix.HermitianFunctionalCalculus
 public import Mathlib.Analysis.SpecialFunctions.ContinuousFunctionalCalculus.Abs
 public import Mathlib.Analysis.SpecialFunctions.ContinuousFunctionalCalculus.ExpLog.Basic
 public import Mathlib.Analysis.SpecialFunctions.ContinuousFunctionalCalculus.PosPart.Basic
@@ -564,3 +566,201 @@ example [Nontrivial A] (ha : IsSelfAdjoint a) (ha_norm : ‖a‖ ≤ 1) :
     nlinarith [sq_abs x, abs_le.mp hx']
 
 end InTheWild
+
+section RealImaginaryPart
+
+/-! ## The real and imaginary parts
+
+`cfc_re_id` and `cfc_im_id` are `Pull` lemmas: they turn `ℜ a` and `ℑ a` into applications of the
+calculus over `ℂ`. `cfc_realPart` and `cfc_imaginaryPart` are `Compose` lemmas: a calculus
+already applied at `ℜ a` is rewritten into one at `a`. -/
+
+variable {A : Type*} [CStarAlgebra A] {a : A}
+
+open Complex ComplexStarModule
+
+example (ha : IsStarNormal a) : (ℜ a : A) = cfc (fun x : ℂ ↦ (x.re : ℂ)) a := by
+  cfc_pull ℂ a
+
+example (ha : IsStarNormal a) : (ℑ a : A) = cfc (fun x : ℂ ↦ (x.im : ℂ)) a := by
+  cfc_pull ℂ a
+
+example (ha : IsStarNormal a) :
+    star (ℜ a : A) * (ℑ a : A) = cfc (fun x : ℂ ↦ star (x.re : ℂ) * (x.im : ℂ)) a := by
+  cfc_pull ℂ a
+
+example (ha : IsStarNormal a) :
+    (ℜ a : A) + I • (ℑ a : A) = cfc (fun x : ℂ ↦ (x.re : ℂ) + I * (x.im : ℂ)) a := by
+  cfc_pull ℂ a
+
+/- `cfc_realPart` as a composition: the element `ℜ a` is made simpler. -/
+example (f : ℂ → ℂ) (ha : IsStarNormal a) (hf : ContinuousOn f (spectrum ℂ (ℜ a : A))) :
+    cfc f (ℜ a : A) = cfc (fun x : ℂ ↦ f x.re) a := by
+  cfc_pull ℂ a
+
+example (f : ℂ → ℂ) (ha : IsStarNormal a) (hf : ContinuousOn f (spectrum ℂ (ℑ a : A))) :
+    star (cfc f (ℑ a : A)) = cfc (fun x : ℂ ↦ star (f x.im)) a := by
+  cfc_pull ℂ a
+
+end RealImaginaryPart
+
+section RealImaginaryPartNonUnital
+
+variable {A : Type*} [NonUnitalCStarAlgebra A] {a : A}
+
+open Complex ComplexStarModule
+
+example (ha : IsStarNormal a) : (ℜ a : A) = cfcₙ (fun x : ℂ ↦ (x.re : ℂ)) a := by
+  cfc_pull ℂ a
+
+example (ha : IsStarNormal a) :
+    (ℜ a : A) + (ℑ a : A) = cfcₙ (fun x : ℂ ↦ (x.re : ℂ) + (x.im : ℂ)) a := by
+  cfc_pull ℂ a
+
+example (f : ℂ → ℂ) (ha : IsStarNormal a) (hf₀ : f 0 = 0)
+    (hf : ContinuousOn f (quasispectrum ℂ (ℜ a : A))) :
+    cfcₙ f (ℜ a : A) = cfcₙ (fun x : ℂ ↦ f x.re) a := by
+  cfc_pull ℂ a
+
+end RealImaginaryPartNonUnital
+
+section HermitianMatrix
+
+/-! ## Hermitian matrices
+
+`Matrix.IsHermitian.cfc_eq` turns the bespoke spectral-theorem construction into the generic
+calculus, which is the direction the library recommends. -/
+
+variable {n 𝕜 : Type*} [RCLike 𝕜] [Fintype n] [DecidableEq n] {M : Matrix n n 𝕜}
+
+example (hM : M.IsHermitian) (f : ℝ → ℝ) : hM.cfc f = cfc f M := by
+  cfc_pull ℝ M
+
+example (hM : M.IsHermitian) (f g : ℝ → ℝ) (hf : ContinuousOn f (spectrum ℝ M))
+    (hg : ContinuousOn g (spectrum ℝ M)) :
+    hM.cfc f * hM.cfc g = cfc (fun x ↦ f x * g x) M := by
+  cfc_pull ℝ M
+
+example (hM : M.IsHermitian) (f : ℝ → ℝ) (hf : ContinuousOn f (spectrum ℝ M)) :
+    star (hM.cfc f) - M = cfc (fun x ↦ star (f x) - x) M := by
+  cfc_pull ℝ M
+
+end HermitianMatrix
+
+section AbsNorm
+
+/-! ## `cfc_comp_norm`
+
+A composition lemma whose structured element is `CFC.abs a`. -/
+
+variable {A : Type*} [CStarAlgebra A] [PartialOrder A] [StarOrderedRing A] {a : A}
+
+example (f : ℂ → ℂ) (ha : IsStarNormal a)
+    (hf : ContinuousOn f ((fun z ↦ (‖z‖ : ℂ)) '' spectrum ℂ a)) :
+    cfc f (CFC.abs a) = cfc (fun x : ℂ ↦ f ‖x‖) a := by
+  cfc_pull ℂ a
+
+example (f : ℝ → ℝ) (ha : IsSelfAdjoint a)
+    (hf : ContinuousOn f ((fun z ↦ (‖z‖ : ℝ)) '' spectrum ℝ a))
+    (hf' : ContinuousOn (fun x : ℝ ↦ f ‖x‖) (spectrum ℝ a)) :
+    cfc f (CFC.abs a) - a = cfc (fun x : ℝ ↦ f ‖x‖ - x) a := by
+  cfc_pull ℝ a
+
+end AbsNorm
+
+section Tsub
+
+/-! ## Truncated subtraction over `ℝ≥0`
+
+`cfc_sub` needs a `CommRing`, so over `ℝ≥0` it is rejected by instance synthesis and `cfc_tsub`
+takes over. It carries the extra hypothesis `∀ x ∈ spectrum ℝ≥0 a, g x ≤ f x`, which becomes a
+`cfc_pull.side` goal. `cfc_tsub` is tagged at a lower priority, so over a ring `cfc_sub` still
+wins. -/
+
+variable {A : Type*} [CStarAlgebra A] [PartialOrder A] [StarOrderedRing A] {a : A}
+
+open scoped NNReal
+
+example (f g : ℝ≥0 → ℝ≥0) (ha : 0 ≤ a) (hfg : ∀ x ∈ spectrum ℝ≥0 a, g x ≤ f x)
+    (hf : ContinuousOn f (spectrum ℝ≥0 a)) (hg : ContinuousOn g (spectrum ℝ≥0 a)) :
+    cfc f a - cfc g a = cfc (fun x ↦ f x - g x) a := by
+  cfc_pull ℝ≥0 a
+
+/- With a concrete `f` and `g` the extra hypothesis is closed automatically. -/
+example (ha : 0 ≤ a) :
+    cfc (fun x : ℝ≥0 ↦ x + 1) a - a = cfc (fun x : ℝ≥0 ↦ x + 1 - x) a := by
+  cfc_pull ℝ≥0 a
+
+/- Over `ℝ` the ordinary `cfc_sub` is preferred, so no such hypothesis appears at all. -/
+example (f g : ℝ → ℝ) (hf : ContinuousOn f (spectrum ℝ a))
+    (hg : ContinuousOn g (spectrum ℝ a)) :
+    cfc f a - cfc g a = cfc (fun x ↦ f x - g x) a := by
+  cfc_pull +deferAll ℝ a <;> assumption
+
+example (f g : ℝ≥0 → ℝ≥0) (ha : 0 ≤ a) (hfg : ∀ x ∈ quasispectrum ℝ≥0 a, g x ≤ f x)
+    (hf : ContinuousOn f (quasispectrum ℝ≥0 a)) (hf0 : f 0 = 0)
+    (hg : ContinuousOn g (quasispectrum ℝ≥0 a)) (hg0 : g 0 = 0) :
+    cfcₙ f a - cfcₙ g a = cfcₙ (fun x ↦ f x - g x) a := by
+  cfc_pull -unital ℝ≥0 a
+
+end Tsub
+
+section StarAlgHom
+
+/-! ## Star algebra homomorphisms
+
+`StarAlgHom.map_cfc` pulls `φ (cfc f a)` towards the calculus at `φ a`. Note that the element to
+pull towards is `φ a`, in the *codomain*: `cfc_pull` fixes one algebra and one element for the
+whole run, so it cannot descend through `φ` into `A`. -/
+
+variable {A B : Type*} [CStarAlgebra A] [CStarAlgebra B] {a : A}
+
+example (φ : A →⋆ₐ[ℂ] B) (f : ℂ → ℂ) (hφ : Continuous φ) (ha : IsStarNormal a)
+    (hφa : IsStarNormal (φ a)) (hf : ContinuousOn f (spectrum ℂ a)) :
+    φ (cfc f a) = cfc f (φ a) := by
+  cfc_pull ℂ (φ a)
+
+example (φ : A →⋆ₐ[ℂ] B) (f g : ℂ → ℂ) (hφ : Continuous φ) (ha : IsStarNormal a)
+    (hφa : IsStarNormal (φ a)) (hf : ContinuousOn f (spectrum ℂ a))
+    (hg : ContinuousOn g (spectrum ℂ a))
+    (hf' : ContinuousOn (fun x ↦ star (f x)) (spectrum ℂ (φ a)))
+    (hg' : ContinuousOn g (spectrum ℂ (φ a))) :
+    star (φ (cfc f a)) * φ (cfc g a) = cfc (fun x ↦ star (f x) * g x) (φ a) := by
+  cfc_pull ℂ (φ a)
+
+end StarAlgHom
+
+section NonUnitalStarAlgHom
+
+variable {A B : Type*} [NonUnitalCStarAlgebra A] [NonUnitalCStarAlgebra B] {a : A}
+
+example (φ : A →⋆ₙₐ[ℂ] B) (f : ℂ → ℂ) (hφ : Continuous φ) (ha : IsStarNormal a) (hf₀ : f 0 = 0)
+    (hφa : IsStarNormal (φ a)) (hf : ContinuousOn f (quasispectrum ℂ a)) :
+    φ (cfcₙ f a) = cfcₙ f (φ a) := by
+  cfc_pull ℂ (φ a)
+
+end NonUnitalStarAlgHom
+
+section Unitization
+
+/-! ## The unitization
+
+`Unitization.complex_cfcₙ_eq_cfc_inr` and friends pull `↑(cfcₙ f a)` into the unital calculus at
+`↑a`. As with `StarAlgHom.map_cfc`, the pull happens entirely inside `A⁺¹`: `cfc_pull` cannot
+descend through the coercion into `A`. -/
+
+variable {A : Type*} [NonUnitalCStarAlgebra A] {a : A}
+
+open scoped NNReal
+
+example (f : ℂ → ℂ) (hf₀ : f 0 = 0) (ha : IsStarNormal (a : Unitization ℂ A))
+    (hf : ContinuousOn f (spectrum ℂ (a : Unitization ℂ A))) :
+    (1 : Unitization ℂ A) - ((cfcₙ f a : A) : Unitization ℂ A) =
+      cfc (fun x : ℂ ↦ 1 - f x) (a : Unitization ℂ A) := by
+  cfc_pull ℂ (a : Unitization ℂ A)
+
+example (f : ℝ → ℝ) (hf₀ : f 0 = 0) :
+    ((cfcₙ f a : A) : Unitization ℂ A) = cfc f (a : Unitization ℂ A) := by
+  cfc_pull ℝ (a : Unitization ℂ A)
+
+end Unitization

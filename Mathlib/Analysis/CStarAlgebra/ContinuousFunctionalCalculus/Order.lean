@@ -45,6 +45,8 @@ open scoped NNReal CStarAlgebra
 
 local notation "σₙ" => quasispectrum
 
+-- lower priority than `cfc_sub`, which is the right lemma whenever the scalars form a ring
+@[cfc_pull 900]
 theorem cfc_tsub {A : Type*} [TopologicalSpace A] [Ring A] [PartialOrder A] [StarRing A]
     [StarOrderedRing A] [Algebra ℝ A] [IsTopologicalRing A] [T2Space A]
     [ContinuousFunctionalCalculus ℝ A IsSelfAdjoint]
@@ -63,6 +65,7 @@ theorem cfc_tsub {A : Type*} [TopologicalSpace A] [Ring A] [PartialOrder A] [Sta
     exact continuous_subtype_val.comp_continuousOn <|
       ContinuousOn.comp ‹_› continuous_real_toNNReal.continuousOn <| ha'.image ▸ Set.mapsTo_image ..
 
+@[cfc_pull 900]
 theorem cfcₙ_tsub {A : Type*} [TopologicalSpace A] [NonUnitalRing A] [PartialOrder A] [StarRing A]
     [StarOrderedRing A] [Module ℝ A] [IsScalarTower ℝ A A] [SMulCommClass ℝ A A]
     [IsTopologicalRing A] [T2Space A] [NonUnitalContinuousFunctionalCalculus ℝ A IsSelfAdjoint]
@@ -127,6 +130,7 @@ lemma concaveOn_of_concaveOn_inr_comp {f : A → A} {s : Set A}
   rw [← inr_le_inr_iff]
   simpa using hf₂.2 hx hy ha hb hab
 
+@[cfc_pull]
 lemma nnreal_cfcₙ_eq_cfc_inr (a : A) (f : ℝ≥0 → ℝ≥0)
     (hf₀ : f 0 = 0 := by cfc_zero_tac) : cfcₙ f a = cfc f (a : A⁺¹) :=
   cfcₙ_eq_cfc_inr inr_nonneg_iff ..

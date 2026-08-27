@@ -396,6 +396,14 @@ def mkEntry (declName : Name) (symm : Bool) (prio : Nat) : MetaM Entry := do
       unless cl.unital == cr.unital do
         throwError "@[cfc_pull] failed: `{declName}` changes both the scalar ring and the\n\
           unitality of the functional calculus; such lemmas are not supported."
+      -- A `Scalar` lemma is applied by `convert`, which relies on it leaving the element alone;
+      -- one that also changes the element would silently produce a result at an element other
+      -- than the one being pulled towards. `cfc_comp_re` is the motivating example.
+      unless ← withNewMCtxDepth <| isDefEq cl.a cr.a do
+        throwError "@[cfc_pull] failed: `{declName}` changes both the scalar ring and the\n\
+          element of the functional calculus; such lemmas are not supported. A scalar\n\
+          conversion must leave the element alone, and a composition must leave the scalar\n\
+          ring alone."
       return .scalar
         { declName, symm, src := .ofExpr cl.R, tgt := .ofExpr cr.R, unital := cl.unital }
     -- if the lhs and rhs are over the same scalar rings, but have different unitality, we

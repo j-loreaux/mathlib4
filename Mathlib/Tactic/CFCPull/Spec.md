@@ -183,13 +183,18 @@ Write `E` for the `cfc`/`cfcₙ` **element** argument and `F` for its **function
 |---|---|---|
 | `Id`      | `cfc (fun x ↦ x) a = a` | exactly one side is a cfc-application, and the other side is exactly its element argument |
 | `Pull`    | `cfc F a = ⟨algebra expression⟩` | exactly one side is a cfc-application |
-| `Scalar`  | `cfc (F : S → S) a = cfc (G : T → T) a` | both sides are cfc-applications with **different** scalar rings |
+| `Scalar`  | `cfc (F : S → S) a = cfc (G : T → T) a` | both sides are cfc-applications with **different** scalar rings, at the **same** element |
 | `Unital`  | `cfcₙ F a = cfc F a` | both sides are cfc-applications, same ring, **different** unitality |
 | `Compose` | `cfc (fun x ↦ F (G x)) a = cfc F ⟨expression in a⟩` | both sides are cfc-applications, same ring and unitality, **different** elements |
 
 For `Compose`, the side to rewrite *from* is the one whose element is the larger expression
 (measured by node count); this is more robust than requiring the other side's element to be a bare
 variable, which fails for lemmas like `cfc_comp_inv : cfc (fun x ↦ f x⁻¹) ↑a = cfc f ↑a⁻¹`.
+
+A lemma that changes the scalar ring *and* the element is rejected, as is one that changes the
+scalar ring and the unitality: `Scalar` lemmas are applied by `convert`, which relies on the
+element surviving, and `Compose` lemmas are indexed at a single ring. `cfc_comp_re` is the
+motivating example; see [§11](#11-deliberate-non-goals-and-future-work).
 
 Stored data per category:
 
@@ -505,7 +510,7 @@ and is exactly the situation `cfc_pull` is designed for: the user finishes with 
 
 ## 9. Lemmas to tag
 
-This is the set tagged in `Mathlib/Tactic/CFCPull/Lemmas.lean`; `#cfc_pull_lemmas` prints it.
+The tags live at the declaration sites; `#cfc_pull_lemmas` prints the resulting database.
 "Generic" means ring key `any`.
 
 **`Id`**: `cfc_id'`, `cfcₙ_id'`.
@@ -528,7 +533,24 @@ in the target ring produces `r * f x` rather than `r • f x`).
 `CFC.rpow_eq_cfc_real` (`ℝ`, unital); `CFC.log_def` (`ℝ`, unital);
 `CFC.exp_eq_normedSpace_exp` (generic — it is stated for `RCLike 𝕜`) with
 `CFC.real_exp_eq_normedSpace_exp` and `CFC.complex_exp_eq_normedSpace_exp` at priority 1100 so
-that `Real.exp`/`Complex.exp` are produced in preference to `NormedSpace.exp`.
+that `Real.exp`/`Complex.exp` are produced in preference to `NormedSpace.exp`;
+`cfc_re_id`, `cfc_im_id`, `cfcₙ_re_id`, `cfcₙ_im_id` (`ℂ`), which turn `ℜ a` and `ℑ a` into
+applications of the calculus; `Matrix.IsHermitian.cfc_eq` (`ℝ`, unital), which replaces the
+bespoke spectral-theorem construction for a Hermitian matrix by the generic calculus;
+`cfc_tsub` and `cfcₙ_tsub` (`ℝ≥0`) at priority **900**, below the generic `cfc_sub`/`cfcₙ_sub`
+that win wherever the scalars form a ring — over `ℝ≥0` those are rejected by instance synthesis
+and the truncated versions take over, at the cost of a `cfc_pull.side` goal
+`∀ x ∈ spectrum ℝ≥0 a, g x ≤ f x`; and the three `Unitization` bridges
+`Unitization.complex_cfcₙ_eq_cfc_inr`, `Unitization.real_cfcₙ_eq_cfc_inr`,
+`Unitization.nnreal_cfcₙ_eq_cfc_inr`, which pull `↑(cfcₙ f a)` into the unital calculus at
+`(a : A⁺¹)`. (The generic `Unitization.cfcₙ_eq_cfc_inr` is *not* tagged: its `hp` hypothesis
+relating the two predicates is not something the tactic can discharge.)
+
+**`Pull`, homomorphisms**: `StarAlgHom.map_cfc` and `NonUnitalStarAlgHom.map_cfcₙ`, which pull
+`φ (cfc f a)` towards the calculus at `φ a` — note that the element to pull towards lives in the
+*codomain*. Their `...Class` counterparts, `StarAlgHomClass.map_cfc` and
+`NonUnitalStarAlgHomClass.map_cfcₙ`, are **not** tagged: their auxiliary scalar ring `S` occurs
+only in the instance arguments and so is undetermined at application time (§11).
 
 Note that when several lemmas describe the same operation at different rings, the candidate
 ordering picks the right one on its own: at target ring `ℝ`, `CFC.sqrt_eq_real_sqrt` costs
@@ -547,15 +569,21 @@ carry non-syntactic hypotheses and are deliberately *not* tagged.
 **`Compose`**: `cfc_comp'`, `cfcₙ_comp'` (head symbol `cfc`/`cfcₙ`; the fallbacks used by step 2),
 `cfc_comp_pow`, `cfc_comp_smul`, `cfc_comp_star`, `cfc_comp_neg`, `cfc_comp_inv`,
 `cfc_comp_zpow`, `cfc_comp_const_mul` (priority 1100), and the non-unital `cfcₙ_comp_smul`,
-`cfcₙ_comp_star`, `cfcₙ_comp_neg`, `cfcₙ_comp_const_mul` (priority 1100).
+`cfcₙ_comp_star`, `cfcₙ_comp_neg`, `cfcₙ_comp_const_mul` (priority 1100). Also
+`cfc_comp_norm` (inner head `CFC.abs`), and `cfc_realPart`, `cfc_imaginaryPart`,
+`cfcₙ_realPart`, `cfcₙ_imaginaryPart` (`ℂ`, inner head the coercion out of `selfAdjoint A`),
+which simplify a calculus applied at `ℜ a` or `ℑ a` into one applied at `a`.
+
+Their `ℝ`-valued companions `cfc_comp_re`, `cfc_comp_im`, `cfcₙ_comp_re`, `cfcₙ_comp_im` cannot
+be tagged: they change the scalar ring *and* the element, and neither category admits that.
+See §11.
 
 `cfc_sum` and `cfcₙ_sum` are tagged, with their bound-hole warning silenced by
 `set_option cfcPull.warnBoundHoles false`: they cannot pull *through* a sum, but they collect one
 whose summands are already applications of the calculus, which is the second half of the staged
 idiom in §11.
 
-Not tagged: `cfc_apply_pi`, the polynomial lemmas (`cfc_map_polynomial`, `cfc_comp_polynomial`),
-and the `Unitization` bridges.
+Not tagged: `cfc_apply_pi`, `cfc_map_pi`, `cfc_map_prod` and `cfcₙ_map_prod` (§11).
 
 ## 10. Errors, tracing and limits
 
@@ -622,7 +650,38 @@ conversions applied.
   whereas `Finset.sum_congr` carries `i ∈ s` and would give `∀ i ∈ s, …`. That is precisely the
   form the `conv` workaround already produces, which is a further reason not to hurry.
 
+* **Compositions that also change the scalar ring.** `cfc_comp_re : cfc (fun x : ℂ ↦ f (re x)) a
+  = cfc f (ℜ a : A)` is a composition — the element `ℜ a` is made simpler — that changes the
+  scalar ring from `ℝ` to `ℂ` on the way. Neither category admits that: `Scalar` lemmas are
+  applied by `convert`, which relies on the element surviving, and `Compose` lemmas record a
+  single ring key. The attribute now rejects such a lemma (§5) rather than entering it as a
+  scalar edge, which is what it used to do — with the effect that `cfc_pull ℝ a` on
+  `cfc (fun x : ℂ ↦ ↑(Real.exp x.re)) a` "converted" it to `cfc Real.exp ↑(ℜ a)`, at the wrong
+  element.
+
+  Supporting them properly is a contained change: give `ComposeLemma` a source and a target ring
+  key instead of one `ring`, index and filter `pullExisting`'s loop on the source key, and let
+  the `pull newE want` that already follows every composition step do the conversion. The
+  `ℂ`-valued `cfc_realPart`/`cfc_imaginaryPart` are tagged and cover the case `f : ℂ → ℂ`; what
+  is missing is the `f : ℝ → ℝ` case.
+
+* **Descending through a homomorphism into another algebra.** A `pull` run fixes one algebra and
+  one element for its whole duration (`Context.alg`, `Context.elem`). So `StarAlgHom.map_cfc`,
+  `Unitization.complex_cfcₙ_eq_cfc_inr` and `cfc_eq_cfc_transfer` are usable only in the
+  degenerate, hole-free direction: `φ (cfc f a)` is pulled towards `cfc f (φ a)`, but
+  `φ (star a * a)` is not, because that needs the sub-pull `star a * a = cfc _ a` to run in the
+  *domain*. Doing it in general means making the algebra and the element part of the mode and
+  threading a per-node `Context`, at which point `map_cfc` becomes a `Compose`-like lemma that
+  relates two different algebras. That is a substantially bigger change than the ring-changing
+  composition above, and the same remark applies to `cfc_map_prod`/`cfc_map_pi`, where the
+  components additionally live at *different* elements of *different* algebras.
+
+* **Lemmas with undetermined variables.** `cfc_map_prod`, `cfcₙ_map_prod`,
+  `StarAlgHomClass.map_cfc` and `NonUnitalStarAlgHomClass.map_cfcₙ` carry an auxiliary scalar
+  ring `S` that occurs in no side of the equation. The attribute accepts them, but
+  `synthesizeInstances` rejects every application, with `the instance argument `CommSemiring ?S`
+  is not determined`. They are therefore left untagged. A corollary specialising `S := R` would
+  make them applicable; whether that is worth stating is a question for the library, not for the
+  tactic.
+
 * **Relations other than binary ones**, and `cfc_pull ... at h`.
-* **Lemma placement.** The `@[cfc_pull]` tags should move from
-  `Mathlib/Tactic/CFCPull/Lemmas.lean` to the declaration sites, along with the three `rfl`
-  lemmas that file adds.
