@@ -240,10 +240,8 @@ lemma sqrt_nonneg (a : A) : 0 ≤ sqrt a := cfcₙ_predicate _ a
 grind_pattern sqrt_nonneg => NonnegSpectrumClass ℝ A, sqrt a
 
 lemma sqrt_eq_nnrpow (a : A) : sqrt a = a ^ (1 / 2 : ℝ≥0) := by
-  simp only [sqrt]
-  congr
-  ext
-  exact_mod_cast NNReal.sqrt_eq_rpow _
+  cfc_pull ℝ≥0 a
+  simp [- one_div, ← NNReal.sqrt_eq_rpow]
 
 lemma sqrt_of_not_nonneg {a : A} (ha : ¬0 ≤ a) : sqrt a = 0 :=
   cfcₙ_apply_of_not_predicate a ha
@@ -251,94 +249,13 @@ lemma sqrt_of_not_nonneg {a : A} (ha : ¬0 ≤ a) : sqrt a = 0 :=
 @[simp]
 lemma sqrt_zero : sqrt (0 : A) = 0 := by simp [sqrt]
 
-variable [IsSemitopologicalRing A] [T2Space A]
-
-@[simp]
-lemma nnrpow_sqrt {a : A} {x : ℝ≥0} : (sqrt a) ^ x = a ^ (x / 2) := by
-  rw [sqrt_eq_nnrpow, nnrpow_nnrpow, one_div_mul_eq_div 2 x]
-
-lemma nnrpow_sqrt_two (a : A) (ha : 0 ≤ a := by cfc_tac) : (sqrt a) ^ (2 : ℝ≥0) = a := by
-  simp only [nnrpow_sqrt, ne_eq, OfNat.ofNat_ne_zero, not_false_eq_true, div_self]
-  rw [nnrpow_one a]
-
 lemma sqrt_mul_sqrt_self (a : A) (ha : 0 ≤ a := by cfc_tac) : sqrt a * sqrt a = a := by
-  rw [← nnrpow_two _, nnrpow_sqrt_two _]
-
-@[simp]
-lemma sqrt_nnrpow {a : A} {x : ℝ≥0} : sqrt (a ^ x) = a ^ (x / 2) := by
-  simp [sqrt_eq_nnrpow, div_eq_mul_inv]
-
-lemma sqrt_nnrpow_two (a : A) (ha : 0 ≤ a := by cfc_tac) : sqrt (a ^ (2 : ℝ≥0)) = a := by
-  simp only [sqrt_nnrpow, ne_eq, OfNat.ofNat_ne_zero, not_false_eq_true, div_self]
-  rw [nnrpow_one _]
-
-lemma sqrt_mul_self (a : A) (ha : 0 ≤ a := by cfc_tac) : sqrt (a * a) = a := by
-  rw [← nnrpow_two _, sqrt_nnrpow_two _]
+  cfc_pull ℝ≥0 a
+  simp
 
 lemma mul_self_eq {a b : A} (h : sqrt a = b) (ha : 0 ≤ a := by cfc_tac) :
     b * b = a :=
   h ▸ sqrt_mul_sqrt_self _ ha
-
-lemma sqrt_unique {a b : A} (h : b * b = a) (hb : 0 ≤ b := by cfc_tac) :
-    sqrt a = b :=
-  h ▸ sqrt_mul_self b
-
-lemma sqrt_eq_iff (a b : A) (ha : 0 ≤ a := by cfc_tac) (hb : 0 ≤ b := by cfc_tac) :
-    sqrt a = b ↔ b * b = a :=
-  ⟨(mul_self_eq ·), (sqrt_unique ·)⟩
-
-lemma sqrt_eq_zero_iff (a : A) (ha : 0 ≤ a := by cfc_tac) : sqrt a = 0 ↔ a = 0 := by
-  rw [sqrt_eq_iff a _, mul_zero, eq_comm]
-
-lemma mul_self_eq_mul_self_iff (a b : A) (ha : 0 ≤ a := by cfc_tac) (hb : 0 ≤ b := by cfc_tac) :
-    a * a = b * b ↔ a = b :=
-  ⟨fun h => sqrt_mul_self a ▸ sqrt_unique h.symm, fun h => h ▸ rfl⟩
-
-/-- Note that the hypothesis `0 ≤ a` is necessary because the continuous functional calculi over
-`ℝ≥0` (for the left-hand side) and `ℝ` (for the right-hand side) use different predicates (i.e.,
-`(0 ≤ ·)` versus `IsSelfAdjoint`). Consequently, if `a` is selfadjoint but not nonnegative, then
-the left-hand side is zero, but the right-hand side is (provably equal to) `CFC.sqrt a⁺`. -/
-@[cfc_pull]
-lemma sqrt_eq_real_sqrt (a : A) (ha : 0 ≤ a := by cfc_tac) :
-    CFC.sqrt a = cfcₙ Real.sqrt a := by
-  suffices cfcₙ (fun x : ℝ ↦ √x * √x) a = cfcₙ (fun x : ℝ ↦ x) a by
-    rwa [cfcₙ_mul .., cfcₙ_id' ..,
-      ← sqrt_eq_iff _ (hb := cfcₙ_nonneg (fun x _ ↦ Real.sqrt_nonneg x))] at this
-  exact cfcₙ_congr fun x hx ↦ Real.mul_self_sqrt <| quasispectrum_nonneg_of_nonneg a ha x hx
-
-section prod
-
-variable {B : Type*} [PartialOrder B] [NonUnitalRing B] [TopologicalSpace B] [StarRing B]
-  [Module ℝ B] [SMulCommClass ℝ B B] [IsScalarTower ℝ B B] [StarOrderedRing B]
-  [NonUnitalContinuousFunctionalCalculus ℝ B IsSelfAdjoint]
-  [NonUnitalContinuousFunctionalCalculus ℝ (A × B) IsSelfAdjoint]
-  [IsSemitopologicalRing B] [T2Space B]
-  [NonnegSpectrumClass ℝ B] [NonnegSpectrumClass ℝ (A × B)]
-
-lemma sqrt_map_prod {a : A} {b : B} (ha : 0 ≤ a := by cfc_tac) (hb : 0 ≤ b := by cfc_tac) :
-    sqrt (a, b) = (sqrt a, sqrt b) := by
-  simp only [sqrt_eq_nnrpow]
-  exact nnrpow_map_prod
-
-end prod
-
-section pi
-
-variable {ι : Type*} {C : ι → Type*} [∀ i, PartialOrder (C i)] [∀ i, NonUnitalRing (C i)]
-  [∀ i, TopologicalSpace (C i)] [∀ i, StarRing (C i)]
-  [∀ i, StarOrderedRing (C i)] [StarOrderedRing (∀ i, C i)]
-  [∀ i, Module ℝ (C i)] [∀ i, SMulCommClass ℝ (C i) (C i)] [∀ i, IsScalarTower ℝ (C i) (C i)]
-  [∀ i, NonUnitalContinuousFunctionalCalculus ℝ (C i) IsSelfAdjoint]
-  [NonUnitalContinuousFunctionalCalculus ℝ (∀ i, C i) IsSelfAdjoint]
-  [∀ i, IsSemitopologicalRing (C i)] [∀ i, T2Space (C i)]
-  [NonnegSpectrumClass ℝ (∀ i, C i)] [∀ i, NonnegSpectrumClass ℝ (C i)]
-
-lemma sqrt_map_pi {c : ∀ i, C i} (hc : ∀ i, 0 ≤ c i := by cfc_tac) :
-    sqrt c = fun i => sqrt (c i) := by
-  simp only [sqrt_eq_nnrpow]
-  exact nnrpow_map_pi
-
-end pi
 
 /-- For an element `a` in a C⋆-algebra, TFAE:
 1. `0 ≤ a`
@@ -385,6 +302,89 @@ theorem _root_.CStarAlgebra.nonneg_iff_eq_mul_star_self {a : A} :
 theorem _root_.CStarAlgebra.nonneg_iff_isSelfAdjoint_and_negPart_eq_zero {a : A} :
     0 ≤ a ↔ IsSelfAdjoint a ∧ a⁻ = 0 := CStarAlgebra.nonneg_TFAE.out 1 8
 
+variable [IsSemitopologicalRing A] [T2Space A]
+
+@[simp]
+lemma nnrpow_sqrt {a : A} {x : ℝ≥0} : (sqrt a) ^ x = a ^ (x / 2) := by
+  rw [sqrt_eq_nnrpow, nnrpow_nnrpow, one_div_mul_eq_div 2 x]
+
+lemma nnrpow_sqrt_two (a : A) (ha : 0 ≤ a := by cfc_tac) : (sqrt a) ^ (2 : ℝ≥0) = a := by
+  cfc_pull ℝ≥0 a
+  simp
+
+@[simp]
+lemma sqrt_nnrpow {a : A} {x : ℝ≥0} : sqrt (a ^ x) = a ^ (x / 2) := by
+  simp [sqrt_eq_nnrpow, div_eq_mul_inv]
+
+lemma sqrt_nnrpow_two (a : A) (ha : 0 ≤ a := by cfc_tac) : sqrt (a ^ (2 : ℝ≥0)) = a := by
+  rw [sqrt_nnrpow]
+  cfc_pull ℝ≥0 a
+  simp
+
+lemma sqrt_mul_self (a : A) (ha : 0 ≤ a := by cfc_tac) : sqrt (a * a) = a := by
+  rw [← nnrpow_two _, sqrt_nnrpow_two _]
+
+lemma sqrt_unique {a b : A} (h : b * b = a) (hb : 0 ≤ b := by cfc_tac) :
+    sqrt a = b :=
+  h ▸ sqrt_mul_self b
+
+lemma sqrt_eq_iff (a b : A) (ha : 0 ≤ a := by cfc_tac) (hb : 0 ≤ b := by cfc_tac) :
+    sqrt a = b ↔ b * b = a :=
+  ⟨(mul_self_eq ·), (sqrt_unique ·)⟩
+
+lemma sqrt_eq_zero_iff (a : A) (ha : 0 ≤ a := by cfc_tac) : sqrt a = 0 ↔ a = 0 := by
+  rw [sqrt_eq_iff a _, mul_zero, eq_comm]
+
+lemma mul_self_eq_mul_self_iff (a b : A) (ha : 0 ≤ a := by cfc_tac) (hb : 0 ≤ b := by cfc_tac) :
+    a * a = b * b ↔ a = b :=
+  ⟨fun h => sqrt_mul_self a ▸ sqrt_unique h.symm, fun h => h ▸ rfl⟩
+
+/-- Note that the hypothesis `0 ≤ a` is necessary because the continuous functional calculi over
+`ℝ≥0` (for the left-hand side) and `ℝ` (for the right-hand side) use different predicates (i.e.,
+`(0 ≤ ·)` versus `IsSelfAdjoint`). Consequently, if `a` is selfadjoint but not nonnegative, then
+the left-hand side is zero, but the right-hand side is (provably equal to) `CFC.sqrt a⁺`. -/
+@[cfc_pull]
+lemma sqrt_eq_real_sqrt (a : A) (ha : 0 ≤ a := by cfc_tac) :
+    CFC.sqrt a = cfcₙ Real.sqrt a := by
+  cfc_pull
+  congr!
+  simp
+  grind
+
+section prod
+
+variable {B : Type*} [PartialOrder B] [NonUnitalRing B] [TopologicalSpace B] [StarRing B]
+  [Module ℝ B] [SMulCommClass ℝ B B] [IsScalarTower ℝ B B] [StarOrderedRing B]
+  [NonUnitalContinuousFunctionalCalculus ℝ B IsSelfAdjoint]
+  [NonUnitalContinuousFunctionalCalculus ℝ (A × B) IsSelfAdjoint]
+  [IsSemitopologicalRing B] [T2Space B]
+  [NonnegSpectrumClass ℝ B] [NonnegSpectrumClass ℝ (A × B)]
+
+lemma sqrt_map_prod {a : A} {b : B} (ha : 0 ≤ a := by cfc_tac) (hb : 0 ≤ b := by cfc_tac) :
+    sqrt (a, b) = (sqrt a, sqrt b) := by
+  simp only [sqrt_eq_nnrpow]
+  exact nnrpow_map_prod
+
+end prod
+
+section pi
+
+variable {ι : Type*} {C : ι → Type*} [∀ i, PartialOrder (C i)] [∀ i, NonUnitalRing (C i)]
+  [∀ i, TopologicalSpace (C i)] [∀ i, StarRing (C i)]
+  [∀ i, StarOrderedRing (C i)] [StarOrderedRing (∀ i, C i)]
+  [∀ i, Module ℝ (C i)] [∀ i, SMulCommClass ℝ (C i) (C i)] [∀ i, IsScalarTower ℝ (C i) (C i)]
+  [∀ i, NonUnitalContinuousFunctionalCalculus ℝ (C i) IsSelfAdjoint]
+  [NonUnitalContinuousFunctionalCalculus ℝ (∀ i, C i) IsSelfAdjoint]
+  [∀ i, IsSemitopologicalRing (C i)] [∀ i, T2Space (C i)]
+  [NonnegSpectrumClass ℝ (∀ i, C i)] [∀ i, NonnegSpectrumClass ℝ (C i)]
+
+lemma sqrt_map_pi {c : ∀ i, C i} (hc : ∀ i, 0 ≤ c i := by cfc_tac) :
+    sqrt c = fun i => sqrt (c i) := by
+  simp only [sqrt_eq_nnrpow]
+  exact nnrpow_map_pi
+
+end pi
+
 end sqrt
 
 end NonUnital
@@ -419,19 +419,20 @@ lemma rpow_def {a : A} {y : ℝ} : a ^ y = cfc (fun x : ℝ≥0 => x ^ y) a := r
 @[cfc_pull]
 lemma rpow_eq_cfc_real [IsSemitopologicalRing A] [T2Space A] {a : A} {y : ℝ}
     (ha : 0 ≤ a := by cfc_tac) : a ^ y = cfc (fun x : ℝ => x ^ y) a := by
-  rw [CFC.rpow_def, cfc_nnreal_eq_real ..]
-  refine cfc_congr ?_
-  intro x hx
+  cfc_pull
+  refine cfc_congr fun x hx ↦ ?_
   simp only [NNReal.coe_rpow, Real.coe_toNNReal']
   grind
+
+-- this attribute should be moved
+attribute [fun_prop] ContinuousOn.rpow_const
 
 lemma cfc_rpow [IsSemitopologicalRing A] [T2Space A] {a : A} {y : ℝ} {f : ℝ → ℝ}
     (hf₁ : ∀ x ∈ spectrum ℝ a, 0 < f x) (hf₂ : ContinuousOn f (spectrum ℝ a) := by cfc_cont_tac)
     (ha : IsSelfAdjoint a := by cfc_tac) : cfc f a ^ y = cfc (fun r => f r ^ y) a := by
-  have hg : ContinuousOn (fun r => r ^ y) (f '' spectrum ℝ a) :=
-    ContinuousOn.rpow_const (f := id) (by fun_prop) (by grind)
-  rw [CFC.rpow_eq_cfc_real (by grind [cfc_nonneg]), ← cfc_comp _ _ a ha]
-  rfl
+  cfc_pull +defer
+  case cfc_pull.continuity => fun_prop (disch := grind)
+  case cfc_pull.side => grind [cfc_nonneg]
 
 lemma rpow_one (a : A) (ha : 0 ≤ a := by cfc_tac) : a ^ (1 : ℝ) = a := by
   simp only [rpow_def, NNReal.rpow_one, cfc_id' ℝ≥0 a]
@@ -461,20 +462,15 @@ lemma rpow_algebraMap {x : ℝ≥0} {y : ℝ} :
 lemma rpow_add {a : A} {x y : ℝ} (ha : IsUnit a) :
     a ^ (x + y) = a ^ x * a ^ y := by
   have ha' : 0 ∉ spectrum ℝ≥0 a := spectrum.zero_notMem _ ha
-  simp only [rpow_def]
-  rw [← cfc_mul _ _ a]
-  refine cfc_congr ?_
-  intro z hz
-  have : z ≠ 0 := by aesop
-  simp [NNReal.rpow_add this _ _]
+  cfc_pull ℝ≥0 a
+  refine cfc_congr fun z hz ↦ ?_
+  grind [NNReal.rpow_add]
 
 lemma rpow_rpow [IsSemitopologicalRing A] [T2Space A]
     (a : A) (x y : ℝ) (hx : x ≠ 0) (ha : IsStrictlyPositive a := by cfc_tac) :
     (a ^ x) ^ y = a ^ (x * y) := by
   have ha₁' : 0 ∉ spectrum ℝ≥0 a := spectrum.zero_notMem _ ha.isUnit
-  simp only [rpow_def]
-  rw [← cfc_comp _ _ a ha.nonneg]
-  refine cfc_congr fun _ _ => ?_
+  cfc_pull ℝ≥0 a
   simp [NNReal.rpow_mul]
 
 lemma rpow_rpow_inv [IsSemitopologicalRing A] [T2Space A]
@@ -489,9 +485,7 @@ lemma rpow_inv_rpow [IsSemitopologicalRing A] [T2Space A]
 
 lemma rpow_rpow_of_exponent_nonneg [IsSemitopologicalRing A] [T2Space A] (a : A) (x y : ℝ)
     (hx : 0 ≤ x) (hy : 0 ≤ y) (ha : 0 ≤ a := by cfc_tac) : (a ^ x) ^ y = a ^ (x * y) := by
-  simp only [rpow_def]
-  rw [← cfc_comp _ _ a]
-  refine cfc_congr fun _ _ => ?_
+  cfc_pull ℝ≥0 a
   simp [NNReal.rpow_mul]
 
 lemma rpow_mul_rpow_neg {a : A} (x : ℝ) (ha : IsStrictlyPositive a := by cfc_tac) :
@@ -510,8 +504,8 @@ lemma rpow_neg_one_eq_inv (a : Aˣ) (ha : (0 : A) ≤ a := by cfc_tac) :
 lemma rpow_neg_one_eq_cfc_inv {A : Type*} [PartialOrder A] [NormedRing A] [StarRing A]
     [StarOrderedRing A] [NormedAlgebra ℝ A] [NonnegSpectrumClass ℝ A]
     [ContinuousFunctionalCalculus ℝ A IsSelfAdjoint] (a : A) :
-    a ^ (-1 : ℝ) = cfc (·⁻¹ : ℝ≥0 → ℝ≥0) a :=
-  cfc_congr fun x _ ↦ NNReal.rpow_neg_one x
+    a ^ (-1 : ℝ) = cfc (·⁻¹ : ℝ≥0 → ℝ≥0) a := by
+  cfc_pull; simp [NNReal.rpow_neg_one]
 
 lemma inverse_eq_rpow_neg_one {a : A} (ha : IsStrictlyPositive a := by cfc_tac) :
     Ring.inverse a = a ^ (-1 : ℝ) := by
@@ -521,9 +515,7 @@ lemma inverse_eq_rpow_neg_one {a : A} (ha : IsStrictlyPositive a := by cfc_tac) 
 lemma rpow_neg [IsSemitopologicalRing A] [T2Space A] (a : Aˣ) (x : ℝ)
     (ha' : (0 : A) ≤ a := by cfc_tac) : (a : A) ^ (-x) = (↑a⁻¹ : A) ^ x := by
   suffices h₁ : ContinuousOn (fun z ↦ z ^ x) (Inv.inv '' (spectrum ℝ≥0 (a : A))) by
-    rw [← cfc_inv_id (R := ℝ≥0) a, rpow_def, rpow_def,
-        ← cfc_comp' (fun z => z ^ x) (Inv.inv : ℝ≥0 → ℝ≥0) (a : A) h₁]
-    refine cfc_congr fun _ _ => ?_
+    cfc_pull ℝ≥0 (a : A)
     simp [NNReal.rpow_neg, NNReal.inv_rpow]
   refine NNReal.continuousOn_rpow_const (.inl ?_)
   rintro ⟨z, hz, hz'⟩
@@ -531,8 +523,7 @@ lemma rpow_neg [IsSemitopologicalRing A] [T2Space A] (a : Aˣ) (x : ℝ)
 
 lemma rpow_intCast (a : Aˣ) (n : ℤ) (ha : (0 : A) ≤ a := by cfc_tac) :
     (a : A) ^ (n : ℝ) = (↑(a ^ n) : A) := by
-  rw [← cfc_zpow (R := ℝ≥0) a n, rpow_def]
-  refine cfc_congr fun _ _ => ?_
+  cfc_pull ℝ≥0 (a : A)
   simp
 
 /-- `a ^ x` bundled as an element of `Aˣ` for `a : Aˣ`. -/
@@ -628,28 +619,29 @@ end pi
 section unital_vs_nonunital
 
 open Ring
+
+lemma sq_sqrt (a : A) (ha : 0 ≤ a := by cfc_tac) : (sqrt a) ^ 2 = a := by
+  rw [pow_two, sqrt_mul_sqrt_self (A := A) a]
+
 variable [IsSemitopologicalRing A] [T2Space A]
 
 -- provides instance `ContinuousFunctionalCalculus.compactSpace_spectrum`
 open scoped ContinuousFunctionalCalculus
 
 lemma nnrpow_eq_rpow {a : A} {x : ℝ≥0} (hx : 0 < x) : a ^ x = a ^ (x : ℝ) := by
-  rw [nnrpow_def (A := A), rpow_def, cfcₙ_eq_cfc]
+  cfc_pull ℝ≥0 a
 
 lemma sqrt_eq_rpow {a : A} : sqrt a = a ^ (1 / 2 : ℝ) := by
-  have : a ^ (1 / 2 : ℝ) = a ^ ((1 / 2 : ℝ≥0) : ℝ) := rfl
-  rw [this, ← nnrpow_eq_rpow (by simp), sqrt_eq_nnrpow a]
+  cfc_pull ℝ≥0 a
+  congr!
+  simp [NNReal.sqrt_eq_rpow]
 
 @[cfc_pull]
 lemma sqrt_eq_cfc {a : A} : sqrt a = cfc NNReal.sqrt a := by
-  unfold sqrt
-  rw [cfcₙ_eq_cfc]
+  cfc_pull
 
 lemma sqrt_sq (a : A) (ha : 0 ≤ a := by cfc_tac) : sqrt (a ^ 2) = a := by
   rw [pow_two, sqrt_mul_self (A := A) a]
-
-lemma sq_sqrt (a : A) (ha : 0 ≤ a := by cfc_tac) : (sqrt a) ^ 2 = a := by
-  rw [pow_two, sqrt_mul_sqrt_self (A := A) a]
 
 lemma sq_eq_sq_iff (a b : A) (ha : 0 ≤ a := by cfc_tac) (hb : 0 ≤ b := by cfc_tac) :
     a ^ 2 = b ^ 2 ↔ a = b := by
