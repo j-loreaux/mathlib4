@@ -136,7 +136,7 @@ lemma nnrpow_two (a : A) (ha : 0 ≤ a := by cfc_tac) : a ^ (2 : ℝ≥0) = a * 
 
 lemma nnrpow_three (a : A) (ha : 0 ≤ a := by cfc_tac) : a ^ (3 : ℝ≥0) = a * a * a := by
   cfc_pull ℝ≥0 a
-  simp only [NNReal.nnrpow_def, NNReal.coe_ofNat, NNReal.rpow_ofNat, pow_three]
+  simp only [NNReal.nnrpow_def, NNReal.coe_ofNat, NNReal.rpow_ofNat, pow_three, mul_assoc]
 
 @[simp]
 lemma zero_nnrpow {x : ℝ≥0} : (0 : A) ^ x = 0 := by simp [nnrpow_def]
