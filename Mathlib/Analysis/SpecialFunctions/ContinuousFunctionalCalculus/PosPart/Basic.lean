@@ -6,7 +6,6 @@ Authors: Jireh Loreaux
 module
 
 public import Mathlib.Analysis.CStarAlgebra.ContinuousFunctionalCalculus.Unique
-public import Mathlib.Tactic.CFCPull.Attr
 public import Mathlib.Topology.ContinuousMap.ContinuousSqrt
 public import Mathlib.Topology.ContinuousMap.StoneWeierstrass
 
@@ -39,10 +38,8 @@ end CStarAlgebra
 
 namespace CFC
 
-@[cfc_pull]
 lemma posPart_def (a : A) : a⁺ = cfcₙ (·⁺ : ℝ → ℝ) a := rfl
 
-@[cfc_pull]
 lemma negPart_def (a : A) : a⁻ = cfcₙ (·⁻ : ℝ → ℝ) a := rfl
 
 @[simp]
@@ -61,20 +58,28 @@ lemma negPart_eq_zero_of_not_isSelfAdjoint {a : A} (ha : ¬IsSelfAdjoint a) : a�
 lemma posPart_mul_negPart (a : A) : a⁺ * a⁻ = 0 := by
   rw [posPart_def, negPart_def]
   by_cases ha : IsSelfAdjoint a
-  · cfc_pull
+  · rw [← cfcₙ_mul _ _, ← cfcₙ_zero ℝ a]
     refine cfcₙ_congr (fun x _ ↦ ?_)
-    grind [_root_.posPart_def, _root_.negPart_def]
+    simp only [_root_.posPart_def, _root_.negPart_def]
+    simpa using le_total x 0
   · simp [cfcₙ_apply_of_not_predicate a ha]
 
 @[simp]
 lemma negPart_mul_posPart (a : A) : a⁻ * a⁺ = 0 := by
-  convert posPart_mul_negPart a using 1
-  cfc_pull ℝ a
-  simp only [mul_comm]
+  rw [posPart_def, negPart_def]
+  by_cases ha : IsSelfAdjoint a
+  · rw [← cfcₙ_mul _ _, ← cfcₙ_zero ℝ a]
+    refine cfcₙ_congr (fun x _ ↦ ?_)
+    simp only [_root_.posPart_def, _root_.negPart_def]
+    simpa using le_total 0 x
+  · simp [cfcₙ_apply_of_not_predicate a ha]
 
 lemma posPart_sub_negPart (a : A) (ha : IsSelfAdjoint a := by cfc_tac) : a⁺ - a⁻ = a := by
-  cfc_pull ℝ a
-  simp
+  rw [posPart_def, negPart_def]
+  rw [← cfcₙ_sub _ _]
+  conv_rhs => rw [← cfcₙ_id ℝ a]
+  congr! 2 with
+  exact _root_.posPart_sub_negPart _
 
 section Unique
 
@@ -83,14 +88,15 @@ variable [T2Space A]
 @[simp]
 lemma posPart_neg (a : A) : (-a)⁺ = a⁻ := by
   by_cases ha : IsSelfAdjoint a
-  · cfc_pull ℝ a
+  · rw [posPart_def, negPart_def, ← cfcₙ_comp_neg _ _]
+    congr! 2
   · have ha' : ¬ IsSelfAdjoint (-a) := fun h ↦ ha (by simpa using h.neg)
     rw [posPart_def, negPart_def, cfcₙ_apply_of_not_predicate a ha,
       cfcₙ_apply_of_not_predicate _ ha']
 
 @[simp]
 lemma negPart_neg (a : A) : (-a)⁻ = a⁺ := by
-  simpa using posPart_neg (-a) |>.symm
+  rw [← eq_comm, ← sub_eq_zero, ← posPart_neg, neg_neg, sub_self]
 
 section SMul
 
@@ -99,8 +105,10 @@ variable [StarModule ℝ A]
 @[simp]
 lemma posPart_smul {r : ℝ≥0} {a : A} : (r • a)⁺ = r • a⁺ := by
   by_cases ha : IsSelfAdjoint a
-  · cfc_pull ℝ a
-    simp [NNReal.smul_def, _root_.posPart_def, mul_max_of_nonneg]
+  · simp only [CFC.posPart_def, NNReal.smul_def]
+    rw [← cfcₙ_comp_smul .., ← cfcₙ_smul ..]
+    refine cfcₙ_congr fun x hx ↦ ?_
+    simp [_root_.posPart_def, mul_max_of_nonneg]
   · obtain (rfl | hr) := eq_or_ne r 0
     · simp
     · have := (not_iff_not.mpr <| (IsSelfAdjoint.all r).smul_iff hr.isUnit (x := a)) |>.mpr ha
@@ -114,14 +122,15 @@ lemma negPart_smul {r : ℝ≥0} {a : A} : (r • a)⁻ = r • a⁻ := by
 lemma posPart_smul_of_nonneg {r : ℝ} (hr : 0 ≤ r) {a : A} : (r • a)⁺ = r • a⁺ :=
   posPart_smul (r := ⟨r, hr⟩)
 
-lemma negPart_smul_of_nonneg {r : ℝ} (hr : 0 ≤ r) {a : A} : (r • a)⁻ = r • a⁻ :=
-  negPart_smul (r := ⟨r, hr⟩)
-
 lemma posPart_smul_of_nonpos {r : ℝ} (hr : r ≤ 0) {a : A} : (r • a)⁺ = -r • a⁻ := by
-  simpa using posPart_smul_of_nonneg (r := -r) (by simpa) (a := -a)
+  nth_rw 1 [← neg_neg r]
+  rw [neg_smul, ← smul_neg, posPart_smul_of_nonneg (neg_nonneg.mpr hr), posPart_neg]
+
+lemma negPart_smul_of_nonneg {r : ℝ} (hr : 0 ≤ r) {a : A} : (r • a)⁻ = r • a⁻ := by
+  conv_lhs => rw [← neg_neg r, neg_smul, negPart_neg, posPart_smul_of_nonpos (by simpa), neg_neg]
 
 lemma negPart_smul_of_nonpos {r : ℝ} (hr : r ≤ 0) {a : A} : (r • a)⁻ = -r • a⁺ := by
-  simpa using negPart_smul_of_nonneg (r := -r) (by simpa) (a := -a)
+  conv_lhs => rw [← neg_neg r, neg_smul, negPart_neg, posPart_smul_of_nonneg (by simpa)]
 
 end SMul
 
@@ -144,7 +153,7 @@ instance : SelfAdjointDecompose A where
 
 lemma posPart_eq_of_eq_sub_negPart {a b : A} (hab : a = b - a⁻) (hb : 0 ≤ b := by cfc_tac) :
     a⁺ = b := by
-  have ha : IsSelfAdjoint a := hab.symm ▸ hb.isSelfAdjoint.sub (negPart_nonneg a).isSelfAdjoint
+  have ha := hab.symm ▸ hb.isSelfAdjoint.sub (negPart_nonneg a).isSelfAdjoint
   nth_rw 1 [← posPart_sub_negPart a] at hab
   simpa using hab
 
@@ -165,7 +174,8 @@ variable [NonnegSpectrumClass ℝ A]
 
 lemma posPart_eq_self (a : A) : a⁺ = a ↔ 0 ≤ a := by
   refine ⟨fun ha ↦ ha ▸ posPart_nonneg a, fun ha ↦ ?_⟩
-  cfc_pull ℝ a
+  conv_rhs => rw [← cfcₙ_id ℝ a]
+  rw [posPart_def]
   refine cfcₙ_congr (fun x hx ↦ ?_)
   simpa [_root_.posPart_def] using quasispectrum_nonneg_of_nonneg a ha x hx
 
@@ -175,30 +185,18 @@ lemma negPart_eq_zero_iff (a : A) (ha : IsSelfAdjoint a := by cfc_tac) :
   nth_rw 2 [← posPart_sub_negPart a]
   simp
 
--- TODO: This next two results and the grind pattern should be moved elsewhere
-lemma quasispectrum_nonpos_of_nonpos {𝕜 A : Type*} [CommRing 𝕜]
-    [PartialOrder 𝕜] [IsOrderedAddMonoid 𝕜] [NonUnitalRing A] [PartialOrder A]
-    [IsOrderedAddMonoid A] [Module 𝕜 A] [NonnegSpectrumClass 𝕜 A]
-    [IsScalarTower 𝕜 A A] [SMulCommClass 𝕜 A A] (a : A) (ha : a ≤ 0) :
-    ∀ x ∈ quasispectrum 𝕜 a, x ≤ 0 := by
-  have := quasispectrum_nonneg_of_nonneg (𝕜 := 𝕜) (-a) (by simpa using ha)
-  simpa [Unitization.quasispectrum_eq_spectrum_inr 𝕜, ← spectrum.neg_eq]
-
-lemma nonpos_of_mem_quasispectrum {𝕜 A : Type*} [CommRing 𝕜]
-    [PartialOrder 𝕜] [IsOrderedAddMonoid 𝕜] [NonUnitalRing A] [PartialOrder A]
-    [IsOrderedAddMonoid A] [Module 𝕜 A] [NonnegSpectrumClass 𝕜 A]
-    [IsScalarTower 𝕜 A A] [SMulCommClass 𝕜 A A] {a : A} (ha : a ≤ 0) {x : 𝕜}
-    (hx : x ∈ quasispectrum 𝕜 a) : x ≤ 0 := quasispectrum_nonpos_of_nonpos a ha x hx
-
-grind_pattern nonpos_of_mem_quasispectrum => x ∈ quasispectrum 𝕜 a
-
 lemma negPart_eq_neg (a : A) : a⁻ = -a ↔ a ≤ 0 := by
-  refine ⟨fun ha ↦ by simpa using (ha ▸ negPart_nonneg a : 0 ≤ -a), fun ha ↦ ?_⟩
-  have ha' := (IsSelfAdjoint.zero A).of_le ha
-  rw [← add_eq_zero_iff_eq_neg]
-  cfc_pull ℝ a
+  rw [← neg_inj, neg_neg, eq_comm]
+  refine ⟨fun ha ↦ by rw [ha, neg_nonpos]; exact negPart_nonneg a, fun ha ↦ ?_⟩
+  rw [← neg_nonneg] at ha
+  rw [negPart_def, ← cfcₙ_neg]
+  have _ : IsSelfAdjoint a := neg_neg a ▸ (IsSelfAdjoint.neg <| .of_nonneg ha)
+  conv_lhs => rw [← cfcₙ_id ℝ a]
   refine cfcₙ_congr fun x hx ↦ ?_
-  grind [_root_.negPart_def]
+  rw [Unitization.quasispectrum_eq_spectrum_inr ℝ, ← neg_neg x, ← Set.mem_neg,
+    spectrum.neg_eq, ← Unitization.inr_neg, ← Unitization.quasispectrum_eq_spectrum_inr ℝ] at hx
+  rw [← neg_eq_iff_eq_neg, eq_comm]
+  simpa using quasispectrum_nonneg_of_nonneg _ ha _ hx
 
 lemma posPart_eq_zero_iff (a : A) (ha : IsSelfAdjoint a := by cfc_tac) :
     a⁺ = 0 ↔ a ≤ 0 := by
@@ -289,8 +287,16 @@ lemma posPart_negPart_unique {a b c : A} (habc : a = b - c) (hbc : b * c = 0)
       all_goals
         refine cfcₙ_congr fun x hx ↦ Eq.symm ?_
         lift x to σₙ ℝ _ using hx
-        simp [f]
-        grind [neg_nonpos]
+        simp only [Subtype.val_injective.extend_apply, comp_apply, coe_mk,
+          ContinuousMap.coe_mk, Subtype.map_coe, id_eq, _root_.posPart_eq_self, f, Pi.zero_apply,
+          posPart_eq_zero]
+      · exact quasispectrum_nonneg_of_nonneg b hb x.val x.property
+      · obtain ⟨x, hx⟩ := x
+        simp only [← neg_nonneg]
+        rw [Unitization.quasispectrum_eq_spectrum_inr ℝ (-c), Unitization.inr_neg,
+          ← spectrum.neg_eq, Set.mem_neg, ← Unitization.quasispectrum_eq_spectrum_inr ℝ c]
+          at hx
+        exact quasispectrum_nonneg_of_nonneg c hc _ hx
     _ = _ := key.symm
     _ = a⁺ := by
       refine cfcₙ_congr fun x hx ↦ ?_
@@ -311,27 +317,28 @@ variable [T2Space A]
 
 @[simp]
 lemma posPart_one : (1 : A)⁺ = 1 := by
-  cfc_pull ℝ (1 : A)
+  rw [CFC.posPart_def, cfcₙ_eq_cfc]
   simp
 
 @[simp]
 lemma negPart_one : (1 : A)⁻ = 0 := by
-  cfc_pull ℝ (1 : A)
+  rw [CFC.negPart_def, cfcₙ_eq_cfc]
   simp
 
 @[simp]
 lemma posPart_algebraMap (r : ℝ) : (algebraMap ℝ A r)⁺ = algebraMap ℝ A r⁺ := by
-  cfc_pull ℝ (1 : A)
+  rw [CFC.posPart_def, cfcₙ_eq_cfc]
+  simp
 
 @[simp]
 lemma negPart_algebraMap (r : ℝ) : (algebraMap ℝ A r)⁻ = algebraMap ℝ A r⁻ := by
-  cfc_pull ℝ (1 : A)
+  rw [CFC.negPart_def, cfcₙ_eq_cfc]
+  simp
 
 open NNReal in
 @[simp]
 lemma posPart_algebraMap_nnreal (r : ℝ≥0) : (algebraMap ℝ≥0 A r)⁺ = algebraMap ℝ≥0 A r := by
-  rw [IsScalarTower.algebraMap_apply ℝ≥0 ℝ A]
-  cfc_pull ℝ (1 : A)
+  rw [CFC.posPart_def, cfcₙ_eq_cfc, IsScalarTower.algebraMap_apply ℝ≥0 ℝ A]
   simp
 
 open NNReal in

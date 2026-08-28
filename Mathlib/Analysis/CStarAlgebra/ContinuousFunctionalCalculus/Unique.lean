@@ -435,7 +435,6 @@ lemma NonUnitalStarAlgHomClass.map_cfcₙ (φ : F) (f : R → R) (a : A)
 
 /-- Non-unital star algebra homomorphisms commute with the non-unital continuous functional
 calculus.  This version is specialized to `A →⋆ₙₐ[S] B` to allow for dot notation. -/
-@[cfc_pull]
 lemma NonUnitalStarAlgHom.map_cfcₙ (φ : A →⋆ₙₐ[S] B) (f : R → R) (a : A)
     (hf : ContinuousOn f (quasispectrum R a) := by cfc_cont_tac)
     (hf₀ : f 0 = 0 := by cfc_zero_tac) (hφ : Continuous φ := by fun_prop) (ha : p a := by cfc_tac)
@@ -485,7 +484,6 @@ lemma StarAlgHomClass.map_cfc (φ : F) (f : R → R) (a : A)
 
 /-- Star algebra homomorphisms commute with the continuous functional calculus.
 This version is specialized to `A →⋆ₐ[S] B` to allow for dot notation. -/
-@[cfc_pull]
 lemma StarAlgHom.map_cfc (φ : A →⋆ₐ[S] B) (f : R → R) (a : A)
     (hf : ContinuousOn f (spectrum R a) := by cfc_cont_tac) (hφ : Continuous φ := by fun_prop)
     (ha : p a := by cfc_tac) (hφa : q (φ a) := by cfc_tac) :

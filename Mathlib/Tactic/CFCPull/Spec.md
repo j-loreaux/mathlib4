@@ -535,7 +535,9 @@ and is exactly the situation `cfc_pull` is designed for: the user finishes with 
 
 ## 9. Lemmas to tag
 
-The tags live at the declaration sites; `#cfc_pull_lemmas` prints the resulting database.
+The tags all live in
+`Mathlib/Analysis/SpecialFunctions/ContinuousFunctionalCalculus/CFCPull/Tags.lean`, so that no
+file in the library depends on the tactic; `#cfc_pull_lemmas` prints the resulting database.
 "Generic" means ring key `any`.
 
 **`Id`**: `cfc_id'`, `cfcₙ_id'`.
@@ -581,8 +583,9 @@ Note that when several lemmas describe the same operation at different rings, th
 ordering picks the right one on its own: at target ring `ℝ`, `CFC.sqrt_eq_real_sqrt` costs
 nothing while `CFC.sqrt_def` costs a scalar conversion, so the former is tried first.
 
-`CFC.sqrt_def`, `CFC.abs_def` and `CFC.log_def` did not exist in Mathlib and are added (all are
-`rfl`) alongside the tags.
+`CFC.sqrt_def`, `CFC.abs_def` and `CFC.log_def` did not exist in Mathlib; they are added (all
+are `rfl`) in `.../CFCPull/Lemmas.lean`, along with `cfcHom_eq_cfc_extend_zero` and
+`cfcₙHom_eq_cfcₙ_extend_zero`.
 
 **`Scalar`**: `cfc_nnreal_eq_real`, `cfcₙ_nnreal_eq_real`, `cfc_real_eq_complex`,
 `cfcₙ_real_eq_complex` in the widening direction, and `cfc_real_eq_nnreal`,

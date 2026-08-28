@@ -65,13 +65,6 @@ variable {A B R S : Type*} [CommSemiring R] [CommRing S] [Nontrivial R] [StarRin
   [NonUnitalContinuousFunctionalCalculus R B pb]
   [ContinuousMapZero.UniqueHom R A] [ContinuousMapZero.UniqueHom R B]
 
-/- Not tagged `@[cfc_pull]`, for two independent reasons. The auxiliary scalar ring `S` occurs
-only in the hypotheses, so `cfc_pull` cannot determine it when it applies the lemma; and even with
-`S` pinned down the two components `cfc f a` and `cfc f b` are not *holes* — a hole must be an
-application of the calculus at the element and in the algebra being pulled towards, here `(a, b)`
-in `A × B` — so the lemma could only collect a pair that is already of the form
-`(cfc f a, cfc f b)`, never build one component by component. See
-`Mathlib/Tactic/CFCPull/Spec.md` §11. -/
 include S in
 lemma cfcₙ_map_prod (f : R → R) (a : A) (b : B)
     (hf : ContinuousOn f (quasispectrum R a ∪ quasispectrum R b) := by cfc_cont_tac)
@@ -126,13 +119,6 @@ variable {A B R S : Type*} [CommSemiring R] [StarRing R] [MetricSpace R]
   [ContinuousFunctionalCalculus R A pa] [ContinuousFunctionalCalculus R B pb]
   [ContinuousMap.UniqueHom R A] [ContinuousMap.UniqueHom R B]
 
-/- Not tagged `@[cfc_pull]`, for two independent reasons. The auxiliary scalar ring `S` occurs
-only in the hypotheses, so `cfc_pull` cannot determine it when it applies the lemma; and even with
-`S` pinned down the two components `cfc f a` and `cfc f b` are not *holes* — a hole must be an
-application of the calculus at the element and in the algebra being pulled towards, here `(a, b)`
-in `A × B` — so the lemma could only collect a pair that is already of the form
-`(cfc f a, cfc f b)`, never build one component by component. See
-`Mathlib/Tactic/CFCPull/Spec.md` §11. -/
 include S in
 lemma cfc_map_prod (f : R → R) (a : A) (b : B)
     (hf : ContinuousOn f (spectrum R a ∪ spectrum R b) := by cfc_cont_tac)

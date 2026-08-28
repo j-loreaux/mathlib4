@@ -10,7 +10,6 @@ public import Mathlib.Analysis.SpecialFunctions.ContinuousFunctionalCalculus.Pos
 public import Mathlib.Analysis.CStarAlgebra.ContinuousFunctionalCalculus.Isometric
 import Mathlib.Analysis.CStarAlgebra.ContinuousFunctionalCalculus.Commute
 import Mathlib.Analysis.SpecialFunctions.ContinuousFunctionalCalculus.Rpow.Isometric
-public import Mathlib.Tactic.CFCPull
 
 
 /-!
@@ -45,9 +44,6 @@ variable [NonUnitalRing A] [StarRing A] [TopologicalSpace A]
 
 /-- The absolute value defined via the non-unital continuous functional calculus. -/
 noncomputable def abs (a : A) := sqrt (star a * a)
-
-@[cfc_pull]
-lemma abs_def (a : A) : abs a = cfcₙ NNReal.sqrt (star a * a) := rfl
 
 @[simp, grind =]
 lemma abs_neg (a : A) : abs (-a) = abs a := by
@@ -129,7 +125,8 @@ lemma abs_of_nonpos (a : A) (ha : a ≤ 0 := by cfc_tac) : abs a = -a := by
 
 lemma abs_eq_cfcₙ_norm (a : A) (ha : IsSelfAdjoint a := by cfc_tac) :
     abs a = cfcₙ (‖·‖) a := by
-  conv_lhs => rw [abs, ha.star_eq]; cfc_pull ℝ a
+  conv_lhs =>
+    rw [abs, ha.star_eq, sqrt_eq_real_sqrt .., ← cfcₙ_id' ℝ a, ← cfcₙ_mul .., ← cfcₙ_comp' ..]
   simp [← sq, Real.sqrt_sq_eq_abs]
 
 protected lemma posPart_add_negPart (a : A) (ha : IsSelfAdjoint a := by cfc_tac) :
@@ -195,7 +192,7 @@ variable (𝕜) in
 lemma abs_eq_cfcₙ_coe_norm (a : A) (ha : p a := by cfc_tac) :
     abs a = cfcₙ (fun z : 𝕜 ↦ (‖z‖ : 𝕜)) a := by
   rw [abs, sqrt_eq_iff _ _ (hb := cfcₙ_norm_nonneg _ _), ← cfcₙ_mul ..]
-  conv_rhs => cfc_pull 𝕜 a
+  conv_rhs => rw [← cfcₙ_id' 𝕜 a, ← cfcₙ_star, ← cfcₙ_mul ..]
   simp [RCLike.conj_mul, sq]
 
 lemma _root_.cfcₙ_comp_norm (f : 𝕜 → 𝕜) (a : A) (ha : p a := by cfc_tac)
@@ -272,7 +269,6 @@ variable [StarModule 𝕜 A] [StarModule ℝ A] [IsScalarTower ℝ 𝕜 A] in
 lemma abs_algebraMap (c : 𝕜) : abs (algebraMap 𝕜 A c) = algebraMap ℝ A ‖c‖ := by
   simp [Algebra.algebraMap_eq_smul_one]
 
-@[cfc_pull]
 lemma _root_.cfc_comp_norm (f : 𝕜 → 𝕜) (a : A) (ha : p a := by cfc_tac)
     (hf : ContinuousOn f ((fun z ↦ (‖z‖ : 𝕜)) '' spectrum 𝕜 a) := by cfc_cont_tac) :
     cfc (f ‖·‖) a = cfc f (abs a) := by

@@ -584,8 +584,11 @@ lemma concaveOn_cfc_rpowIntegrand₀₁ {p t : ℝ} (hp : p ∈ Ioo 0 1) (ht : 0
     rw [rpowIntegrand₀₁_eq_sub (by grind) ht]
     have hg : ContinuousOn (fun z : ℝ => (t + z)⁻¹) (spectrum ℝ x) := by
       fun_prop (disch := grind -abstractProof)
+    have hf : ContinuousOn (fun z : ℝ => (1 + z)) (spectrum ℝ x) := by fun_prop
     have hspectrum :  ∀ r ∈ spectrum ℝ x, t + r ≠ 0 := by grind
-    cfc_pull
+    have := cfc_sub (fun _ : ℝ => t ^ (p - 1)) (fun z : ℝ => t ^ p * (t + z)⁻¹) x
+    rw [this, cfc_const .., cfc_const_mul .., cfc_inv _ _ hspectrum .., cfc_const_add ..,
+        cfc_id' ..]
   refine ConcaveOn.congr ?_ h₁.symm
   refine ConcaveOn.sub (concaveOn_const _ (convex_Ici 0)) ?_
   exact ConvexOn.smul (by positivity) <| CStarAlgebra.convexOn_ringInverse_algebraMap_add ht

@@ -140,7 +140,6 @@ instance instContinuousFunctionalCalculusIsClosedEmbedding :
     ClosedEmbeddingContinuousFunctionalCalculus ℝ (Matrix n n 𝕜) IsSelfAdjoint where
   isClosedEmbedding _ hA := cfcHom_eq_cfcAux hA ▸ hA.isHermitian.isClosedEmbedding_cfcAux
 
-@[cfc_pull]
 lemma cfc_eq (f : ℝ → ℝ) : cfc f A = hA.cfc f := by
   have hA' : IsSelfAdjoint A := hA
   have := cfcHom_eq_of_continuous_of_map_id hA' hA.cfcAux hA.isClosedEmbedding_cfcAux.continuous

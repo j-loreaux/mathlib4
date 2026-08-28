@@ -10,19 +10,31 @@ metaprogramming techniques that do the real work.
 Mathlib/Tactic/CFCPull/Attr.lean       -- ring keys, lemma categories, env extensions, @[cfc_pull]
 Mathlib/Tactic/CFCPull/Core.lean       -- PullM, the recursion (pure MetaM)
 Mathlib/Tactic/CFCPull/Frontend.lean   -- syntax, tactic and conv elaborators
-Mathlib/Tactic/CFCPull/Lemmas.lean     -- `attribute [cfc_pull] ...` for the Mathlib lemma set
 Mathlib/Tactic/CFCPull.lean            -- imports the above
+
+Mathlib/Analysis/SpecialFunctions/ContinuousFunctionalCalculus/CFCPull/
+  Lemmas.lean       -- the handful of lemmas the tactic needs and Mathlib was missing
+  Tags.lean         -- `attribute [cfc_pull] ...` for the whole Mathlib lemma set
+  ComplexSqrt.lean  -- `CFC.sqrt` through the calculus over `ℂ`
 
 MathlibTest/CFCPull/Examples.lean      -- the main test suite
 MathlibTest/CFCPull/Failures.lean      -- every failure mode, pinned with `#guard_msgs`
 MathlibTest/CFCPull/Tracing.lean       -- what `trace.Tactic.cfc_pull` prints
 ```
 
-`Attr.lean` depends only on `Mathlib.Init` and `Lean.Meta`, so that in a final PR the
-`@[cfc_pull]` tags can migrate to the declaration sites in `Mathlib/Analysis/...`. Until then
-`Lemmas.lean` collects them in one place, which keeps the diff surveyable at the cost of an
-unusual `Tactic → Analysis` import. `Lemmas.lean` is also where the handful of missing `rfl`
-lemmas (`CFC.sqrt_def`, `CFC.abs_def`, `CFC.log_def`) live for now.
+`Attr.lean` depends only on `Mathlib.Init` and `Lean.Meta`, and nothing under `Mathlib/Tactic/`
+imports anything from `Mathlib/Analysis/`, so the tactic stays where a tactic belongs and
+`Mathlib/Tactic.lean` stays light.
+
+Everything the tactic needs *from* the library therefore lives on the other side of that line,
+under `Analysis/SpecialFunctions/ContinuousFunctionalCalculus/CFCPull/`, and no pre-existing file
+imports any of it. `Tags.lean` collects the `@[cfc_pull]` tags in one place rather than writing
+them at the declaration sites: it keeps the change surveyable, it keeps the analysis files free
+of a dependency on the tactic, and it puts the reasons a lemma is *not* tagged next to the ones
+that are. `Lemmas.lean` is where the handful of lemmas Mathlib was missing live —
+`CFC.sqrt_def`, `CFC.abs_def`, `CFC.log_def`, the two `Function.extend` specialisations and
+`CFC.quasispectrum_nonpos_of_nonpos` — each of which belongs, eventually, in the file that
+defines the operation it is about.
 
 ## 2. Core data structures (`Attr.lean`)
 
@@ -317,6 +329,8 @@ Two refinements were added on top of the plan once the examples were running:
 
 Remaining loose ends, in rough priority order:
 
-1. The `@[cfc_pull]` tags in `Lemmas.lean` should move to the declaration sites, and the three
-   `rfl` lemmas it adds (`CFC.sqrt_def`, `CFC.abs_def`, `CFC.log_def`) to their natural homes.
+1. The `@[cfc_pull]` tags in `Tags.lean` should eventually move to the declaration sites, and
+   the lemmas `Lemmas.lean` adds (`CFC.sqrt_def`, `CFC.abs_def`, `CFC.log_def`,
+   `cfcHom_eq_cfc_extend_zero`, `cfcₙHom_eq_cfcₙ_extend_zero`,
+   `CFC.quasispectrum_nonpos_of_nonpos`) to their natural homes.
 2. The scalar-ring choice is greedy (see `Spec.md` §11).

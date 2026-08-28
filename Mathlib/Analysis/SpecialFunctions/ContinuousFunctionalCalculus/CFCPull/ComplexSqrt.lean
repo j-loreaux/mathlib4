@@ -6,7 +6,8 @@ Authors: Jireh Loreaux
 module
 
 public import Mathlib.Analysis.Complex.SqrtDeriv
-public import Mathlib.Analysis.SpecialFunctions.ContinuousFunctionalCalculus.Rpow.Basic
+public import Mathlib.Analysis.SpecialFunctions.ContinuousFunctionalCalculus.CFCPull.Tags
+public import Mathlib.Tactic.CFCPull
 
 /-!
 # `CFC.sqrt` via the complex functional calculus
@@ -17,6 +18,8 @@ wants when the surrounding computation is taking place over `ℂ`.
 
 ## Main results
 
+* `Complex.continuousOn_sqrt_setOf_re_nonneg`: `Complex.sqrt` is continuous on the closed right
+  half-plane.
 * `Complex.continuousOn_sqrt_quasispectrum`, `Complex.continuousOn_sqrt_spectrum`:
   `Complex.sqrt` is continuous on the (quasi)spectrum of a nonnegative element, which is what
   makes the calculus applicable to it in the first place.
@@ -40,6 +43,16 @@ example (ha : 0 ≤ a) : CFC.sqrt a * CFC.sqrt a = cfc (fun x : ℂ ↦ x.sqrt *
 public section
 
 open scoped NNReal
+
+namespace Complex
+
+/-- `Complex.sqrt` is continuous on the closed right half-plane. This is not comparable with
+`Complex.continuousOn_sqrt`: `slitPlane` omits `0` but includes the points with negative real
+part and nonzero imaginary part. -/
+lemma continuousOn_sqrt_setOf_re_nonneg : ContinuousOn sqrt {z | 0 ≤ z.re} :=
+  fun _z hz ↦ (continuousAt_sqrt (.inl hz)).continuousWithinAt
+
+end Complex
 
 section NonUnital
 

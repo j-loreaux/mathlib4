@@ -44,21 +44,22 @@ public lemma convexOn_ringInverse :
   have xinvpos : IsStrictlyPositive x⁻¹ʳ := by grind
   have hsp : IsStrictlyPositive (a • 1 + b • z) := by
     by_cases ha' : 0 < a <;> grind [smul_nonneg]
-  have h₁ := calc
-    (a • 1 + b • z) ^ (-1 : ℝ) = cfc (fun r => a + b * r) z ^ (-1 : ℝ) := by
-      congr! 1; cfc_pull; simp
-    _ = cfc (fun r => (a + b * r) ^ (-1 : ℝ)) z := cfc_rpow fun r hr ↦ by
-      by_cases ha' : a = 0
-      · have hb' : b = 1 := by grind
-        simp only [ha', hb', one_mul, zero_add, gt_iff_lt]
-        #adaptation_note /-- Before nightly-2026-06-04, this was just `grind.
-        `spectrum_pos` is not activating in `grind` despite the
-        ```
-        grind_pattern IsStrictlyPositive.spectrum_pos => x ∈ spectrum 𝕜 a, IsStrictlyPositive a
-        ```
-        rule, because `grind` will not fill in the `𝕜 := ℝ`. -/
-        exact zpos.spectrum_pos hr
-      · grind [add_pos_of_pos_of_nonneg, mul_nonneg]
+  have h₁ : (a • 1 + b • z) ^ (-1 : ℝ) = cfc (fun r => (a + b * r) ^ (-1 : ℝ)) z := by
+    rw [← cfc_smul_id (R := ℝ) (S := ℝ) b z, ← Algebra.algebraMap_eq_smul_one,
+        ← cfc_const_add a (fun r => b • r) z]
+    simp only [smul_eq_mul]
+    refine cfc_rpow fun r hr => ?_
+    by_cases ha' : a = 0
+    · have hb' : b = 1 := by grind
+      simp only [ha', hb', one_mul, zero_add, gt_iff_lt]
+      #adaptation_note /-- Before nightly-2026-06-04, this was just `grind.
+      `spectrum_pos` is not activating in `grind` despite the
+      ```
+      grind_pattern IsStrictlyPositive.spectrum_pos => x ∈ spectrum 𝕜 a, IsStrictlyPositive a
+      ```
+      rule, because `grind` will not fill in the `𝕜 := ℝ`. -/
+      exact zpos.spectrum_pos hr
+    · grind [add_pos_of_pos_of_nonneg, mul_nonneg]
   have h₂ : (a • 1 + b • z ^ (-1 : ℝ)) = cfc (fun r => (a + b * r ^ (-1 : ℝ))) z := by
     rw [CFC.rpow_eq_cfc_real zpos.nonneg]
     have hcont : ContinuousOn (fun r : ℝ => (r ^ (-1 : ℝ))) (spectrum ℝ z) :=
