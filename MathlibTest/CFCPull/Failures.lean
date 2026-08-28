@@ -52,11 +52,15 @@ example (ha : IsStarNormal a) : star a * a = star a * a := by
 error: `cfc_pull`'s first argument is the scalar ring, but `a` did not elaborate as a type:
   type expected, got
     (a : A)
-If `a` is the element to pull towards, give the scalar ring as well, as in `cfc_pull ℝ a`.
+If `a` is the element to pull towards, give the scalar ring too — or `_`, as in `cfc_pull _ a`.
 -/
 #guard_msgs in
 example (ha : IsStarNormal a) : star a * a = cfc (fun x : ℂ ↦ star x * x) a := by
   cfc_pull a
+
+/- Which is exactly what `_` is for: the element alone, with the ring read off the goal. -/
+example (ha : IsStarNormal a) : star a * a = cfc (fun x : ℂ ↦ star x * x) a := by
+  cfc_pull _ a
 
 /--
 error: `cfc_pull` made no progress
@@ -94,10 +98,21 @@ error: `cfc_pull` made no progress
 example (ha : IsStarNormal a) : star a * a = star a * a := by
   cfc_pull (maxDepth := 1) ℂ a
 
+/- Not every failure is a failure to rewrite. Reaching `ℝ≥0` from `ℝ` is a scalar conversion
+with a side condition of its own — `cfc_real_eq_nnreal` asks for `0 ≤ a` — so a pull towards
+`ℝ≥0` of an element that is only known to be selfadjoint gets all the way there and then fails
+on the condition. -/
 /--
-error: `cfc_pull` made no progress
-  `cfc_pull` got stuck on `a⁺`
-    (head symbol: PosPart.posPart, target: cfc over ℝ≥0 at `a`)
+error: `cfc_pull` rewrote the goal but could not discharge 1 side goal:
+  case cfc_pull.side
+  A : Type u_1
+  inst✝² : CStarAlgebra A
+  inst✝¹ : PartialOrder A
+  inst✝ : StarOrderedRing A
+  a b : A
+  ha : IsSelfAdjoint a
+  ⊢ 0 ≤ a
+Use `cfc_pull +defer ..` to have them added to the goal list instead.
 -/
 #guard_msgs in
 example (ha : IsSelfAdjoint a) : a⁺ = a⁺ := by
@@ -185,12 +200,12 @@ example (ha : IsStarNormal a) : star a + b = cfc (fun x : ℂ ↦ star x) a + b 
 the side goals of a pull that succeeded. -/
 /--
 error: `cfc_pull` made no progress
-  `cfc_pull` got stuck on `a⁺`
-    (head symbol: PosPart.posPart, target: cfc over ℝ≥0 at `a`)
+  `cfc_pull` got stuck on `star b * b`
+    (head symbol: HMul.hMul, target: cfc over ℂ at `a`)
 -/
 #guard_msgs in
-example (ha : IsSelfAdjoint a) : a⁺ = a⁺ := by
-  cfc_pull +deferAll ℝ≥0 a
+example (ha : IsStarNormal a) : star b * b = star b * b := by
+  cfc_pull +deferAll ℂ a
 
 /- A `=> tac` block that does not close everything it was handed is an error naming what is
 left, rather than the bare `conv` complaint the same goal would have produced without a block.
@@ -239,6 +254,40 @@ goal to work on. `all_goals ..` is the way to write a block that tolerates an em
 #guard_msgs in
 example (ha : IsStarNormal a) : star a + b = cfc (fun x : ℂ ↦ star x) a + b := by
   conv_lhs => arg 1; cfc_pull ℂ a => exact ha
+
+/-! #### The lemma list -/
+
+/- `-foo` is only meaningful for a lemma that is in the set to begin with; a name that is not
+there is much more likely to be a typo than a no-op the user wanted. -/
+/--
+error: `Nat.add_comm` is not in the `cfc_pull` lemma set, so `-Nat.add_comm` has nothing to remove
+-/
+#guard_msgs in
+example (ha : IsStarNormal a) : star a = cfc (fun x : ℂ ↦ star x) a := by
+  cfc_pull [-Nat.add_comm] ℂ a
+
+/- A lemma added at the call site is classified exactly as `@[cfc_pull]` would classify it, and
+is rejected here for the same reasons and with the same message, reported at the name. -/
+/--
+error: @[cfc_pull] failed: neither side of `Nat.add_comm` has `cfc` or `cfcₙ`
+as its head symbol:
+  ?n + ?m = ?m + ?n
+-/
+#guard_msgs in
+example (ha : IsStarNormal a) : star a = cfc (fun x : ℂ ↦ star x) a := by
+  cfc_pull [Nat.add_comm] ℂ a
+
+/- Only declaration names may be listed. A local hypothesis is what `simp` would take here, so
+the message says why this is not `simp`. -/
+/--
+error: `hf` is a local hypothesis, and `cfc_pull`'s lemma list takes declaration names only: a
+  `@[cfc_pull]` lemma is instantiated from its constant, so there is nothing for a hypothesis to
+  be. Rewrite with it first, as in `rw [hf]`.
+-/
+#guard_msgs (whitespace := lax) in
+example (ha : IsStarNormal a) (f : ℂ → ℂ) (hf : star a = cfc f a) :
+    star a = cfc (fun x : ℂ ↦ star x) a := by
+  cfc_pull [hf] ℂ a
 
 end Tactic
 

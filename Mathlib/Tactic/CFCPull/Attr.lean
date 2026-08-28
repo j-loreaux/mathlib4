@@ -153,13 +153,11 @@ def RingKey.matchesRing (k : RingKey) (R : Expr) : MetaM Bool := do
 structure IdLemma where
   /-- The name of the tagged declaration. -/
   declName : Name
-  /-- Whether the lemma is used right-to-left. -/
-  symm : Bool
   /-- The scalar ring of the `cfc` application. -/
   ring : RingKey
   /-- Whether the lemma is about `cfc` (`true`) or `cfcₙ` (`false`). -/
   unital : Bool
-  /-- Whether the `cfc` side is the left-hand side (after `symm` has been taken into account). -/
+  /-- Whether the `cfc` side is the left-hand side. -/
   cfcOnLhs : Bool
   deriving Inhabited, BEq, Repr
 
@@ -172,15 +170,13 @@ positions at which the tactic recurses. -/
 structure PullLemma where
   /-- The name of the tagged declaration. -/
   declName : Name
-  /-- Whether the lemma is used right-to-left. -/
-  symm : Bool
   /-- The attribute priority. -/
   prio : Nat
   /-- The scalar ring of the `cfc` application. -/
   ring : RingKey
   /-- Whether the lemma is about `cfc` (`true`) or `cfcₙ` (`false`). -/
   unital : Bool
-  /-- Whether the `cfc` side is the left-hand side (after `symm` has been taken into account). -/
+  /-- Whether the `cfc` side is the left-hand side. -/
   cfcOnLhs : Bool
   /-- The number of holes on the algebraic side. -/
   numHoles : Nat
@@ -189,13 +185,13 @@ structure PullLemma where
 /-- A lemma relating the calculus over two different scalar rings, e.g.
 `cfc_real_eq_complex : cfc f a = cfc (fun x ↦ f x.re : ℂ → ℂ) a`.
 
-Such a lemma is an edge `src → tgt` of the scalar conversion graph; it is only ever used in the
-direction in which it is stated (the reverse directions carry non-syntactic hypotheses). -/
+Such a lemma is an edge `src → tgt` of the scalar conversion graph, running from the ring of its
+left-hand side to the ring of its right-hand side. It is only ever used in that direction: the
+opposite conversion is a lemma of its own (here `cfc_complex_eq_real`), stated the other way
+round and carrying the hypothesis that makes it true. -/
 structure ScalarLemma where
   /-- The name of the tagged declaration. -/
   declName : Name
-  /-- Whether the lemma is used right-to-left. -/
-  symm : Bool
   /-- The ring converted *from*. -/
   src : RingKey
   /-- The ring converted *to*. -/
@@ -209,8 +205,6 @@ directions. -/
 structure UnitalLemma where
   /-- The name of the tagged declaration. -/
   declName : Name
-  /-- Whether the lemma is used right-to-left. -/
-  symm : Bool
   /-- The scalar ring of the two `cfc` applications. -/
   ring : RingKey
   /-- Whether the non-unital side is the left-hand side. -/
@@ -225,8 +219,6 @@ indexed by; for `cfc_comp'` it is `cfc` itself. -/
 structure ComposeLemma where
   /-- The name of the tagged declaration. -/
   declName : Name
-  /-- Whether the lemma is used right-to-left. -/
-  symm : Bool
   /-- The attribute priority. -/
   prio : Nat
   /-- The scalar ring of the two `cfc` applications. -/
@@ -274,6 +266,26 @@ def Lemmas.addEntry (s : Lemmas) : Entry → Lemmas
   | .scalar l => { s with scalar := s.scalar.push l }
   | .unital l => { s with unital := s.unital.push l }
   | .compose l => { s with compose := s.compose.push l }
+
+/-- Whether the database has an entry for `declName`. -/
+def Lemmas.contains (s : Lemmas) (declName : Name) : Bool :=
+  s.pull.values.any (·.declName == declName) || s.id.any (·.declName == declName) ||
+    s.scalar.any (·.declName == declName) || s.unital.any (·.declName == declName) ||
+    s.compose.any (·.declName == declName)
+
+/-- Remove every entry for `declName` from the database.
+
+Used only by the bracketed lemma list of `cfc_pull`, which modifies the set for a single call;
+there is no way to remove a lemma from the database itself. Every category is searched, since
+one declaration produces exactly one entry but not always in the category one expects. -/
+def Lemmas.erase (s : Lemmas) (declName : Name) : Lemmas where
+  -- `DiscrTree` has no `erase`, so the entry is filtered out of every bucket instead; the keys
+  -- of an emptied bucket stay in the tree, where they cost a lookup that returns nothing.
+  pull := s.pull.mapArrays (·.filter (·.declName != declName))
+  id := s.id.filter (·.declName != declName)
+  scalar := s.scalar.filter (·.declName != declName)
+  unital := s.unital.filter (·.declName != declName)
+  compose := s.compose.filter (·.declName != declName)
 
 /-- The environment extension holding the `@[cfc_pull]` lemmas. -/
 initialize cfcPullExt : SimpleScopedEnvExtension Entry Lemmas ←
@@ -365,23 +377,24 @@ register_option cfcPull.warnBoundHoles : Bool := {
 /-! ### Classification -/
 
 /-- Instantiate a tagged lemma: returns its metavariables, their binder infos, the two sides of
-the equation (swapped if the lemma is used right-to-left) and a proof of `lhs = rhs`. -/
-def instantiateLemma (declName : Name) (symm : Bool) :
+the equation and a proof of `lhs = rhs`.
+
+A tagged lemma is always read in the direction it is stated. Every category but `Scalar` is
+recognised from whichever side carries the calculus and applied in whichever direction the pull
+calls for, so the two readings of the equation coincide; a `Scalar` lemma is an edge of the
+conversion graph, and the side it is stated from *is* the direction of that edge. -/
+def instantiateLemma (declName : Name) :
     MetaM (Array Expr × Array BinderInfo × Expr × Expr × Expr) := do
   let c ← mkConstWithFreshMVarLevels declName
   let (mvars, bis, type) ← forallMetaTelescopeReducing (← inferType c)
   let some (_, lhs, rhs) ← matchEq? type |
     throwError "`{declName}` is not an equation"
-  let proof := mkAppN c mvars
-  if symm then
-    return (mvars, bis, rhs, lhs, ← mkEqSymm proof)
-  else
-    return (mvars, bis, lhs, rhs, proof)
+  return (mvars, bis, lhs, rhs, mkAppN c mvars)
 
 /-- Build the database entry for `declName`, or throw an informative error explaining why the
 lemma cannot be used by `cfc_pull`. -/
-def mkEntry (declName : Name) (symm : Bool) (prio : Nat) : MetaM Entry := do
-  let (_, _, lhs, rhs, _) ← instantiateLemma declName symm
+def mkEntry (declName : Name) (prio : Nat) : MetaM Entry := do
+  let (_, _, lhs, rhs, _) ← instantiateLemma declName
   match CFCApp.match? lhs, CFCApp.match? rhs with
   | none, none =>
     throwError "@[cfc_pull] failed: neither side of `{declName}` has `cfc` or `cfcₙ`\n\
@@ -405,11 +418,11 @@ def mkEntry (declName : Name) (symm : Bool) (prio : Nat) : MetaM Entry := do
           conversion must leave the element alone, and a composition must leave the scalar\n\
           ring alone."
       return .scalar
-        { declName, symm, src := .ofExpr cl.R, tgt := .ofExpr cr.R, unital := cl.unital }
+        { declName, src := .ofExpr cl.R, tgt := .ofExpr cr.R, unital := cl.unital }
     -- if the lhs and rhs are over the same scalar rings, but have different unitality, we
     -- enter this as a unital lemma
     if cl.unital != cr.unital then
-      return .unital { declName, symm, ring := .ofExpr cl.R, nonUnitalOnLhs := !cl.unital }
+      return .unital { declName, ring := .ofExpr cl.R, nonUnitalOnLhs := !cl.unital }
     -- same ring, same unitality: this must be a composition lemma
     if ← withNewMCtxDepth <| isDefEq cl.a cr.a then
       throwError "@[cfc_pull] failed: both sides of `{declName}` are applications of the same\n\
@@ -425,12 +438,12 @@ def mkEntry (declName : Name) (symm : Bool) (prio : Nat) : MetaM Entry := do
       throwError "@[cfc_pull] failed: the element `{src.a}` in `{declName}` has no head\n\
         constant to index on."
     return .compose
-      { declName, symm, prio, ring := .ofExpr cl.R, unital := cl.unital, srcOnLhs, innerHead }
+      { declName, prio, ring := .ofExpr cl.R, unital := cl.unital, srcOnLhs, innerHead }
 where
   /-- Classify a lemma with a `cfc` application on exactly one side. -/
   mkPullEntry (c : CFCApp) (alg : Expr) (cfcOnLhs : Bool) : MetaM Entry := do
     if ← withNewMCtxDepth <| isDefEq alg c.a then
-      return .id { declName, symm, ring := .ofExpr c.R, unital := c.unital, cfcOnLhs }
+      return .id { declName, ring := .ofExpr c.R, unital := c.unital, cfcOnLhs }
     let isVar (e : Expr) : MetaM Bool := return e.isMVar
     let (pat, holes, _) ← abstractHoles (isHoleFor c isVar) (mkFreshExprMVar c.A) alg
     for b in ← boundHoles c alg do
@@ -447,14 +460,16 @@ where
       throwError "@[cfc_pull] failed: the non-`cfc` side of `{declName}` is `{alg}`,\n\
         which has no head symbol to index on."
     return .pull
-      { declName, symm, prio, ring := .ofExpr c.R, unital := c.unital, cfcOnLhs,
+      { declName, prio, ring := .ofExpr c.R, unital := c.unital, cfcOnLhs,
         numHoles := holes.size }
       keys
 
 /-- The `cfc_pull` attribute marks lemmas for use by the `cfc_pull` tactic.
 
 A tagged lemma must be an equation with `cfc` or `cfcₙ` as the head symbol of at least one side.
-Use `@[cfc_pull ←]` to have the lemma used from right to left.
+It is always read in the direction it is stated: for every category but `Scalar` the direction
+makes no difference, and a `Scalar` lemma is an edge of the conversion graph pointing from the
+ring of its left-hand side to the ring of its right-hand side.
 
 Examples of lemmas in each of the five categories the attribute recognises:
 ```
@@ -465,7 +480,7 @@ Examples of lemmas in each of the five categories the attribute recognises:
 @[cfc_pull] cfc_comp_pow       : cfc (f <| · ^ n) a = cfc f (a ^ n)
 ```
 -/
-syntax (name := cfcPullAttr) "cfc_pull" (" ←" <|> " <-")? (ppSpace prio)? : attr
+syntax (name := cfcPullAttr) "cfc_pull" (ppSpace prio)? : attr
 
 initialize registerBuiltinAttribute {
   -- The single backtick is required. Attributes live in a flat `Name`-keyed map which
@@ -476,31 +491,29 @@ initialize registerBuiltinAttribute {
   name := `cfcPullAttr
   descr := "lemma used by the `cfc_pull` tactic"
   add := fun declName stx kind => MetaM.run' do
-    let symm := !stx[1].isNone
-    let prio ← getAttrParamOptPrio stx[2]
-    cfcPullExt.add (← mkEntry declName symm prio) kind
+    let prio ← getAttrParamOptPrio stx[1]
+    cfcPullExt.add (← mkEntry declName prio) kind
 }
 
 /-- `#cfc_pull_lemmas` displays the contents of the `@[cfc_pull]` database. Useful for
 debugging the tactic and its lemma set. -/
 elab "#cfc_pull_lemmas" : command => Elab.Command.liftTermElabM do
   let l ← getLemmas
-  let nm (n : Name) (symm : Bool) : MessageData := if symm then m!"{n} ←" else m!"{n}"
   let sec (header : String) (xs : Array MessageData) : MessageData :=
     if xs.isEmpty then m!"{header}: (none)"
     else m!"{header}:{indentD (MessageData.joinSep xs.toList m!"\n")}"
   logInfo <| MessageData.joinSep [
     sec "identity lemmas" <| l.id.map fun e =>
-      m!"{nm e.declName e.symm} : ring := {e.ring}, unital := {e.unital}",
+      m!"{e.declName} : ring := {e.ring}, unital := {e.unital}",
     sec "pull lemmas" <| l.pull.values.map fun e =>
-      m!"{nm e.declName e.symm} : ring := {e.ring}, unital := {e.unital}, \
+      m!"{e.declName} : ring := {e.ring}, unital := {e.unital}, \
         holes := {e.numHoles}, prio := {e.prio}",
     sec "scalar lemmas" <| l.scalar.map fun e =>
-      m!"{nm e.declName e.symm} : {e.src} → {e.tgt}, unital := {e.unital}",
+      m!"{e.declName} : {e.src} → {e.tgt}, unital := {e.unital}",
     sec "unital lemmas" <| l.unital.map fun e =>
-      m!"{nm e.declName e.symm} : ring := {e.ring}",
+      m!"{e.declName} : ring := {e.ring}",
     sec "compose lemmas" <| l.compose.map fun e =>
-      m!"{nm e.declName e.symm} : ring := {e.ring}, unital := {e.unital}, \
+      m!"{e.declName} : ring := {e.ring}, unital := {e.unital}, \
         inner := {e.innerHead}"] m!"\n"
 
 /-- Tracing for the `cfc_pull` tactic. -/

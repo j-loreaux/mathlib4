@@ -435,7 +435,7 @@ lemma cfc_rpow [IsSemitopologicalRing A] [T2Space A] {a : A} {y : ℝ} {f : ℝ 
   case cfc_pull.side => grind [cfc_nonneg]
 
 lemma rpow_one (a : A) (ha : 0 ≤ a := by cfc_tac) : a ^ (1 : ℝ) = a := by
-  simp only [rpow_def, NNReal.rpow_one, cfc_id' ℝ≥0 a]
+  cfc_pull ℝ≥0 a; simp
 
 @[simp]
 lemma one_rpow {x : ℝ} : (1 : A) ^ x = (1 : A) := by simp [rpow_def]
@@ -450,8 +450,7 @@ lemma rpow_zero_eqOn : (Set.Ici (0 : A)).EqOn (fun a => a ^ (0 : ℝ)) (fun _ =>
 lemma zero_rpow {x : ℝ} (hx : x ≠ 0) : rpow (0 : A) x = 0 := by simp [rpow, NNReal.zero_rpow hx]
 
 lemma rpow_natCast (a : A) (n : ℕ) (ha : 0 ≤ a := by cfc_tac) : a ^ (n : ℝ) = a ^ n := by
-  rw [← cfc_pow_id (R := ℝ≥0) a n, rpow_def]
-  congr
+  cfc_pull ℝ≥0 a
   simp
 
 @[simp]

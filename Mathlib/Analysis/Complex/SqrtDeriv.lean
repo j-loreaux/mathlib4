@@ -66,4 +66,10 @@ lemma continuousAt_sqrt {z : ℂ} (hz : 0 ≤ z.re ∨ z.im ≠ 0) : ContinuousA
 lemma continuousOn_sqrt : ContinuousOn sqrt slitPlane :=
   fun _ hz => (continuousAt_sqrt (hz.imp le_of_lt id)).continuousWithinAt
 
+/-- `Complex.sqrt` is continuous on the closed right half-plane. This is not comparable with
+`Complex.continuousOn_sqrt`: `slitPlane` omits `0` but includes the points with negative real
+part and nonzero imaginary part. -/
+lemma continuousOn_sqrt_setOf_re_nonneg : ContinuousOn sqrt {z | 0 ≤ z.re} :=
+  fun _z hz ↦ (continuousAt_sqrt (.inl hz)).continuousWithinAt
+
 end Complex

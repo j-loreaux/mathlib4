@@ -51,6 +51,27 @@ set_option trace.Tactic.cfc_pull true in
 example (ha : IsStarNormal a) : star a = cfc (fun x : ℂ ↦ star x) a := by
   cfc_pull ℂ a
 
+/-! ### The lemma list
+
+The candidate list is where a bracketed `[..]` shows up: `-cfc_star_id` takes that lemma out for
+this call, and the pull falls through to `cfc_star`, whose algebraic side `star (cfc f a)` has a
+hole — hence the extra node for the recursion into `a`. -/
+
+/--
+trace: [Tactic.cfc_pull] predicate for cfc over ℂ is IsStarNormal
+[Tactic.cfc_pull] ✅️ pull star a into a cfc over ℂ
+  [Tactic.cfc_pull] candidates: [cfc_star, cfcₙ_star_id, cfcₙ_star]
+  [Tactic.cfc_pull] ✅️ pull a into a cfc over ℂ
+    [Tactic.cfc_pull] `cfc_id'`: filled `IsStarNormal a` from the shared predicate proof
+[Tactic.cfc_pull] predicate for cfc over ℂ is IsStarNormal
+[Tactic.cfc_pull] ✅️ pull cfc (fun x => star x) a into a cfc over ℂ
+[Tactic.cfc_pull] ✅️ closed `IsStarNormal a` with `assumption`
+-/
+#guard_msgs in
+set_option trace.Tactic.cfc_pull true in
+example (ha : IsStarNormal a) : star a = cfc (fun x : ℂ ↦ star x) a := by
+  cfc_pull [-cfc_star_id] ℂ a
+
 /-! ### Backtracking
 
 Candidates are tried best-first and the trace records each rejection with the reason. Here
@@ -76,7 +97,10 @@ trace: [Tactic.cfc_pull] predicate for cfc over ℂ is IsStarNormal
 [Tactic.cfc_pull] ✅️ pull cfc (fun x => 3 • x) a into a cfc over ℂ
 [Tactic.cfc_pull] ✅️ closed `IsStarNormal a` with `assumption`
 -/
+-- `pp.mvars.anonymous false` so that the unnamed metavariable in the rejected pattern prints as
+-- `?_` rather than with an index that every edit above this point would shift
 #guard_msgs in
+set_option pp.mvars.anonymous false in
 set_option trace.Tactic.cfc_pull true in
 example (ha : IsStarNormal a) : (3 : ℕ) • a = cfc (fun x : ℂ ↦ (3 : ℕ) • x) a := by
   cfc_pull ℂ a
@@ -170,9 +194,14 @@ example (ha : IsStrictlyPositive a) :
 
 When the tactic gets stuck, the trace is the way to find out why. `💥️` marks the node that
 failed, and the reason here is that the only lemma indexed under `PosPart.posPart` lives over
-`ℝ`, from which there is no conversion to the requested `ℝ≥0` — so it is not even offered as a
-candidate. The error message reports the head symbol and the element being pulled towards, but
-not that reason. -/
+`ℝ`, from which — with `cfc_real_eq_nnreal` and its non-unital counterpart taken out of the set
+— there is no conversion to the requested `ℝ≥0`, so it is not even offered as a candidate. The
+error message reports the head symbol and the element being pulled towards, but not that
+reason.
+
+(The removal is what makes the failure happen: with the whole set, `ℝ≥0`, `ℝ` and `ℂ` are all
+reachable from one another, and this pull instead succeeds and leaves the `0 ≤ a` that
+`cfc_real_eq_nnreal` asks for as a side goal.) -/
 
 /--
 error: `cfc_pull` made no progress
@@ -191,7 +220,7 @@ trace: [Tactic.cfc_pull] predicate for cfc over ℝ≥0 is fun x => 0 ≤ x
 #guard_msgs in
 set_option trace.Tactic.cfc_pull true in
 example (ha : IsSelfAdjoint a) : a⁺ = a⁺ := by
-  cfc_pull ℝ≥0 a
+  cfc_pull [-cfc_real_eq_nnreal, -cfcₙ_real_eq_nnreal] ℝ≥0 a
 
 /-! ### The lemma database
 

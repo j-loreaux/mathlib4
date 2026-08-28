@@ -63,19 +63,20 @@ applied and *what* the mode should be.
 ## 2. User-facing syntax
 
 ```
-cfc_pull (config)? (R)? (a)?
+cfc_pull (config)? (disch := tac)? ([lemmas])? (R)? (a)?
 ```
 and, in `conv` mode,
 ```
-conv ... => cfc_pull (config)? (R)? (a)? (=> tac)?
+conv ... => cfc_pull (config)? (disch := tac)? ([lemmas])? (R)? (a)? (=> tac)?
 ```
 
-* `R` is the scalar ring, `a` the element of the algebra. Both are optional and positional; if
-  `a` is omitted it must be inferrable, and if `R` is omitted both must be inferrable (you cannot
-  give `a` without `R`).
-* **Inference.** If either is omitted, the tactic scans the goal for a subterm of the form
-  `cfc f b` or `cfcₙ f b`, preferring the right-hand side of a relation, and takes `R`/`a` from
-  it. This makes `cfc_pull` alone work for the common goal shape `lhs = cfc f a`.
+* `R` is the scalar ring, `a` the element of the algebra. Both are optional and positional, and
+  either may be written `_`, which is the same as omitting it — that is how to give the element
+  and leave the ring to be read off the goal.
+* **Inference.** For each argument omitted or written `_`, the tactic scans the goal for a
+  subterm of the form `cfc f b` or `cfcₙ f b`, preferring the right-hand side of a relation, and
+  takes `R`/`a` from it. This makes `cfc_pull` alone work for the common goal shape
+  `lhs = cfc f a`.
 * **Configuration** (standard `optConfig` syntax):
   * `+unital` / `-unital` (default `+unital`). Read as *prefer* the unital calculus: with
     `+unital` the tactic uses `cfc` whenever a unital `ContinuousFunctionalCalculus R A p`
@@ -97,6 +98,26 @@ conv ... => cfc_pull (config)? (R)? (a)? (=> tac)?
   a term, so it is a separate syntax node and `elabCFCPullConfig` omits the corresponding field.
   The default does nothing, and so does any discharger given alongside `+deferAll`, which skips
   every attempt at a side goal.
+* **The lemma list** (`[foo, -bar]`). The lemmas the tactic uses are those tagged `@[cfc_pull]`
+  ([§5](#5-the-cfc_pull-attribute)); a bracketed list adjusts that set for one call. `foo` adds
+  `foo` — classified exactly as the attribute would classify it, read in the direction it is
+  stated, and with the default priority; `-foo` removes every entry for `foo`. There is no
+  `only`, and the database is never modified: removal exists so that a lemma can be kept out of
+  the way of one being added, not so that the library can be edited from a proof.
+
+  This is what makes a lemma usable without tagging it. `CFC.sqrt_eq_cfcₙ_complex_sqrt` is the
+  motivating case: tagged globally it would put a `ContinuousOn Complex.sqrt ..` goal in the way
+  of every pull that meets a square root, `Complex.sqrt` being continuous only away from the
+  negative reals. See [§9](#9-lemmas-to-tag).
+
+  Only declaration names may be listed — a tagged lemma is instantiated from its constant, so a
+  local hypothesis cannot be one, and naming one is an error that says so. `-foo` on a name that
+  is not in the set is an error too, rather than a silent no-op: it is far more likely to be a
+  typo.
+
+  The list goes *before* the positional arguments, where `simp`'s and `rw`'s lists go relative
+  to their location. That is not only for the analogy: both arguments are optional, so a list
+  written after them would make `cfc_pull [foo]` read `[foo]` as the scalar ring.
 * **The `=> tac` block** (`conv` mode only). A tactic sequence that is handed the side goals the
   pull did not close, and must close all of them; see [§7](#7-side-goals). It exists because a
   `conv` block cannot end with unsolved goals, which is what makes deferring useless there.
@@ -167,14 +188,18 @@ application.
 ## 5. The `cfc_pull` attribute
 
 ```
-@[cfc_pull] @[cfc_pull ←] @[cfc_pull (prio)]
+@[cfc_pull] @[cfc_pull (prio)]
 ```
 
-marks a lemma for use by the tactic. `←` uses the lemma right-to-left. Tagged lemmas must be
-equations `lhs = rhs` in which at least one side has `cfc` or `cfcₙ` as its head symbol. The
-attribute analyses the statement (under `forallMetaTelescopeReducing`, so that the lemma's
-binders become the same metavariables the tactic will later unify against) and sorts it into one
-of **five** categories. (The draft had four; the `Id` category is split off from `Pull` because
+marks a lemma for use by the tactic. There is no right-to-left form: for every category but
+`Scalar` the equation is recognised from whichever side carries the calculus and applied in
+whichever direction the pull calls for, so a direction marker would change nothing, and a
+`Scalar` lemma is an edge of the conversion graph running from the ring of its left-hand side
+to the ring of its right-hand side — the direction it is stated in *is* the direction of the
+edge. Tagged lemmas must be equations `lhs = rhs` in which at least one side has `cfc` or
+`cfcₙ` as its head symbol. The attribute analyses the statement (under `forallMetaTelescopeReducing`, so
+that the lemma's binders become the same metavariables the tactic will later unify against) and
+sorts it into one of **five** categories. (The draft had four; the `Id` category is split off from `Pull` because
 its algebra side has no head symbol to index on.)
 
 Write `E` for the `cfc`/`cfcₙ` **element** argument and `F` for its **function** argument.
@@ -554,15 +579,21 @@ only in the instance arguments and so is undetermined at application time (§11)
 
 Note that when several lemmas describe the same operation at different rings, the candidate
 ordering picks the right one on its own: at target ring `ℝ`, `CFC.sqrt_eq_real_sqrt` costs
-nothing while `CFC.sqrt_def` costs a scalar conversion, and at `ℝ≥0` the `ℝ` lemma is discarded
-because there is no conversion `ℝ → ℝ≥0`.
+nothing while `CFC.sqrt_def` costs a scalar conversion, so the former is tried first.
 
 `CFC.sqrt_def`, `CFC.abs_def` and `CFC.log_def` did not exist in Mathlib and are added (all are
 `rfl`) alongside the tags.
 
 **`Scalar`**: `cfc_nnreal_eq_real`, `cfcₙ_nnreal_eq_real`, `cfc_real_eq_complex`,
-`cfcₙ_real_eq_complex`. The reverse directions (`cfc_real_eq_nnreal`, `cfc_complex_eq_real`)
-carry non-syntactic hypotheses and are deliberately *not* tagged.
+`cfcₙ_real_eq_complex` in the widening direction, and `cfc_real_eq_nnreal`,
+`cfcₙ_real_eq_nnreal`, `cfc_complex_eq_real`, `cfcₙ_complex_eq_real` in the narrowing one. The
+four narrowing lemmas carry a hypothesis the tactic cannot read off the syntax — `∀ x ∈
+spectrum ℝ a, 0 ≤ f x` for the first two, `∀ x ∈ spectrum ℂ a, star (f x) = f x` for the other
+two — which comes back as a `cfc_pull.side` goal, and `cfc_real_eq_nnreal` additionally asks for
+`0 ≤ a`. They are tagged all the same: with them the three rings are reachable from one another,
+so `cfc_pull ℝ≥0 a` on a `ℂ`-expression is a matter of discharging conditions rather than of
+finding a route. The price is that a pull towards `ℝ≥0` of an element only known to be
+selfadjoint now fails on `0 ≤ a` instead of reporting that it got stuck.
 
 **`Unital`**: `cfcₙ_eq_cfc`.
 
@@ -584,6 +615,13 @@ whose summands are already applications of the calculus, which is the second hal
 idiom in §11.
 
 Not tagged: `cfc_apply_pi`, `cfc_map_pi`, `cfc_map_prod` and `cfcₙ_map_prod` (§11).
+
+Also not tagged, and for a different reason: `CFC.sqrt_eq_cfc_complex_sqrt` and
+`CFC.sqrt_eq_cfcₙ_complex_sqrt`, which read `CFC.sqrt a` as the calculus applied to
+`Complex.sqrt`. `Complex.sqrt` is continuous only away from the negative reals, so tagging them
+would put a `ContinuousOn Complex.sqrt ..` goal in the way of every pull that meets a square
+root — one that `Complex.continuousOn_sqrt_spectrum` closes, but only where `0 ≤ a` is at hand.
+They are the intended use of the bracketed lemma list of §2: name them where they are wanted.
 
 ## 10. Errors, tracing and limits
 

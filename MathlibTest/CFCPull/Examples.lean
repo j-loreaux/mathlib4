@@ -6,16 +6,15 @@ Authors: Jireh Loreaux
 module
 
 public import Mathlib.Tactic.CFCPull
-public import Mathlib.Analysis.Complex.SqrtDeriv
 public import Mathlib.Analysis.CStarAlgebra.Classes
 public import Mathlib.Analysis.CStarAlgebra.ContinuousFunctionalCalculus.Isometric
 public import Mathlib.Analysis.CStarAlgebra.ContinuousFunctionalCalculus.Order
 public import Mathlib.Analysis.CStarAlgebra.ContinuousFunctionalCalculus.RealImaginaryPart
 public import Mathlib.Analysis.Matrix.HermitianFunctionalCalculus
-public import Mathlib.Analysis.RCLike.Sqrt
 public import Mathlib.Analysis.SpecialFunctions.ContinuousFunctionalCalculus.Abs
 public import Mathlib.Analysis.SpecialFunctions.ContinuousFunctionalCalculus.ExpLog.Basic
 public import Mathlib.Analysis.SpecialFunctions.ContinuousFunctionalCalculus.PosPart.Basic
+public import Mathlib.Analysis.SpecialFunctions.ContinuousFunctionalCalculus.Rpow.ComplexSqrt
 public import Mathlib.Analysis.SpecialFunctions.ContinuousFunctionalCalculus.Rpow.Basic
 public import Mathlib.Analysis.SpecialFunctions.Pow.Continuity
 public import Mathlib.Tactic.Linarith
@@ -56,6 +55,14 @@ variable {R A : Type*} {p : A → Prop} [CommSemiring R]
 example (ha : p a) :
     star a * a = cfc (fun x : R ↦ star x * x) a := by
   cfc_pull R a
+
+/- Both are optional, and `_` in either position asks for that one to be read off the goal —
+which is the only way to give the element and leave the ring to be inferred. All four of these
+are the pull above. -/
+example (ha : p a) : star a * a = cfc (fun x : R ↦ star x * x) a := by cfc_pull R _
+example (ha : p a) : star a * a = cfc (fun x : R ↦ star x * x) a := by cfc_pull _ a
+example (ha : p a) : star a * a = cfc (fun x : R ↦ star x * x) a := by cfc_pull _ _
+example (ha : p a) : star a * a = cfc (fun x : R ↦ star x * x) a := by cfc_pull
 
 /- Note that `+defer` would make no difference here: it does not switch the discharging off, it
 only changes what happens to the goals the discharging could not close, and here there are none.
@@ -500,6 +507,85 @@ example (ha : IsStarNormal a) : True := by
 
 end LetBound
 
+section LemmaList
+
+/-! ## `[..]`: the lemma set for one call
+
+The lemmas `cfc_pull` uses are those tagged `@[cfc_pull]`. A bracketed list — before the scalar
+ring and the element, where `simp`'s and `rw`'s lists go relative to their location — adjusts
+that set for a single call: `foo` adds a lemma and `-foo` takes one out. The database itself is
+never modified, which is the point — a lemma that would be a nuisance tagged globally is still
+usable where it is wanted. See the `CFC.sqrt` example in `InTheWild` below for the case this was
+built for. -/
+
+namespace LemmaListTest
+
+variable {A : Type*} [CStarAlgebra A] {a : A}
+
+/- `public` only so that the error message below names `LemmaListTest.sq` rather than the
+private-name mangling of it; this file has no `public section`. -/
+
+/-- An operation the `@[cfc_pull]` set says nothing about … -/
+public def sq (a : A) : A := a * a
+
+/-- … and the lemma that reads it, deliberately left untagged. -/
+public theorem cfc_sq (f : ℂ → ℂ) (a : A)
+    (hf : ContinuousOn f (spectrum ℂ a) := by cfc_cont_tac) :
+    sq (cfc f a) = cfc (fun x ↦ f x * f x) a :=
+  (cfc_mul f f a hf hf).symm
+
+/- Without it the pull stops at `sq a`, which is an atom as far as the tactic is concerned. -/
+/--
+error: `cfc_pull` made no progress
+  `cfc_pull` got stuck on `LemmaListTest.sq a`
+    (head symbol: LemmaListTest.sq, target: cfc over ℂ at `a`)
+-/
+#guard_msgs in
+example (ha : IsStarNormal a) : sq a = cfc (fun x : ℂ ↦ x * x) a := by
+  cfc_pull ℂ a
+
+/- Naming it is all it takes; it is classified exactly as the attribute would classify it. -/
+example (ha : IsStarNormal a) : sq a = cfc (fun x : ℂ ↦ x * x) a := by
+  cfc_pull [cfc_sq] ℂ a
+
+/- There is no right-to-left form, here or on the attribute: the equation is recognised from
+whichever side carries the calculus and applied in whichever direction the pull calls for, so
+`cfc_sq` would do the same work stated the other way round. The one category where the
+direction matters is `Scalar`, and there the direction the lemma is stated in is the direction
+of the conversion. -/
+
+/- The list may be given on its own, with the scalar ring and the element read off the goal as
+usual — which is what the ordering buys. -/
+example (ha : IsStarNormal a) : sq a = cfc (fun x : ℂ ↦ x * x) a := by
+  cfc_pull [cfc_sq]
+
+/- And in `conv` mode, where it goes before the `=> ..` block. -/
+example (ha : IsStarNormal a) (b : A) : sq a + b = cfc (fun x : ℂ ↦ x * x) a + b := by
+  conv in sq a =>
+    cfc_pull +deferAll [cfc_sq] ℂ a =>
+      case cfc_pull.predicate => exact ha
+      all_goals fun_prop
+
+/- `-foo` takes a lemma out. `a * a` is read by `cfc_mul`, or failing that by `cfcₙ_mul` followed
+by a conversion to the unital calculus; with both gone there is nothing left that can read it. -/
+/--
+error: `cfc_pull` made no progress
+  `cfc_pull` got stuck on `a * a`
+    (head symbol: HMul.hMul, target: cfc over ℂ at `a`)
+-/
+#guard_msgs in
+example (ha : IsStarNormal a) : a * a = cfc (fun x : ℂ ↦ x * x) a := by
+  cfc_pull [-cfc_mul, -cfcₙ_mul] ℂ a
+
+/- Removing one of the two leaves the other to do the work, so the goal still closes — see
+`Tracing.lean` for the trace that shows the difference. -/
+example (ha : IsStarNormal a) : a * a = cfc (fun x : ℂ ↦ x * x) a := by
+  cfc_pull [-cfc_mul] ℂ a
+
+end LemmaListTest
+
+end LemmaList
+
 section RealTheorems
 
 /-! ## `cfc_pull` followed by `cfc_congr`
@@ -547,9 +633,6 @@ example : ((star a * a) * (1 - star a * a) ^ 2 : A⁺¹) =
     cfc (fun x : ℂ => x * (1 - x) ^ 2) (star a * a : A⁺¹) := by
   cfc_pull ℂ (star a * a : A⁺¹)
 
--- these attributes should be moved to the declarations themselves.
-attribute [cfc_pull] cfc_complex_eq_real cfcₙ_complex_eq_real cfc_real_eq_nnreal cfcₙ_real_eq_nnreal
-
 -- this is a bit of a weird example because it pulls towards `ℝ` rather than `ℂ`.
 example : ((star a * a) * (1 - star a * a) ^ 2 : A⁺¹) =
     cfc (fun x : ℂ => x * (1 - x) ^ 2) (star a * a : A⁺¹) := by
@@ -564,45 +647,19 @@ end NonUnital
 variable {A : Type*} [CStarAlgebra A] [PartialOrder A] [StarOrderedRing A]
 variable {a : A}
 
--- this should be moved and generalized
--- both this lemma and the unital version of it below should *not* be marked `cfc_pull` by default.
--- This is because they will frequently generate annoying continuity side goals that are hard to
--- solve since `Complex.sqrt` is not globally continuous.
--- nevertheless, we should have a method of *temporarily* adding or removing `cfc_pull` lemmas to
--- the set of lemmas used by `cfc_pull`
+/- `CFC.sqrt_eq_cfc_complex_sqrt` and its non-unital counterpart
+`CFC.sqrt_eq_cfcₙ_complex_sqrt` are deliberately *not* tagged `@[cfc_pull]`: `Complex.sqrt` is
+continuous only away from the negative reals, so tagging them would put a `ContinuousOn
+Complex.sqrt ..` goal in the way of every pull that meets a square root — one that can be closed
+only when the element is known to be nonnegative. Naming the lemma where it is wanted costs
+nothing. -/
+example (ha : 0 ≤ a) : CFC.sqrt a * CFC.sqrt a = cfc (fun x : ℂ ↦ x.sqrt * x.sqrt) a := by
+  cfc_pull [CFC.sqrt_eq_cfc_complex_sqrt] ℂ a
 
-open scoped NNReal in
-lemma CFC.sqrt_eq_cfcₙ_complex_sqrt {A : Type*} [NonUnitalCStarAlgebra A] [PartialOrder A]
-    [StarOrderedRing A] {a : A} (ha : 0 ≤ a) :
-    CFC.sqrt a = cfcₙ (fun x : ℂ ↦ x.sqrt) a := by
-  cfc_pull
-  refine cfcₙ_congr ?_
-  rw [← (ha.isSelfAdjoint.quasispectrumRestricts.comp rfl (.nnreal_of_nonneg ha)).algebraMap_image]
-  rintro - ⟨x, hx, rfl⟩
-  rw [IsScalarTower.algebraMap_apply ℝ≥0 ℝ ℂ]
-  aesop (add simp [Complex.sqrt_of_nonneg])
-
-lemma Complex.continuousOn_sqrt_setOf_re_nonneg : ContinuousOn Complex.sqrt {z | 0 ≤ z.re} :=
-  fun _z hz ↦ continuousAt_sqrt (.inl hz) |>.continuousWithinAt
-
--- this should be generalized.
-@[fun_prop]
-lemma Complex.continuousOn_sqrt_quasispectrum {A : Type*} [CStarAlgebra A] [PartialOrder A]
-    [StarOrderedRing A] {a : A} (ha : 0 ≤ a) :
-    ContinuousOn Complex.sqrt (quasispectrum ℂ a) := by
-  refine Complex.continuousOn_sqrt_setOf_re_nonneg.mono ?_
-  rw [← ha.isSelfAdjoint.quasispectrumRestricts.algebraMap_image]
-  rintro - ⟨x, hx, rfl⟩
-  simp
-  grind
-
-lemma CFC.sqrt_eq_cfc_complex_sqrt {A : Type*} [CStarAlgebra A] [PartialOrder A]
-    [StarOrderedRing A] {a : A} (ha : 0 ≤ a) :
-    CFC.sqrt a = cfc (fun x : ℂ ↦ x.sqrt) a := by
-  sorry
-  -- here is where we would like to be able to temporarily add `CFC.sqrt_eq_cfcₙ_complex_sqrt` to
-  -- the set of `cfc_pull` lemmas. If we could do that, then this would work:
-  -- `cfc_pull -unital ℂ a [CFC.sqrt_eq_cfcₙ_complex_sqrt]`
+/- The non-unital lemma reaches the same goal through `cfcₙ_eq_cfc`, at the cost of the
+`Complex.sqrt 0 = 0` side goal that conversion raises. -/
+example (ha : 0 ≤ a) : CFC.sqrt a * CFC.sqrt a = cfc (fun x : ℂ ↦ x.sqrt * x.sqrt) a := by
+  cfc_pull [CFC.sqrt_eq_cfcₙ_complex_sqrt] ℂ a
 
 example (ha : IsSelfAdjoint a) :
     a + I • cfcₙ Real.sqrt (1 - a ^ 2) = cfc (fun x ↦ x + I * ↑√(1 - x.re ^ 2)) a := by

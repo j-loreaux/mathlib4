@@ -408,10 +408,10 @@ This single routine covers the `Scalar`, `Unital` and `Compose` categories: they
 which of the ring, the unitality and the element the two sides disagree about, and none of that
 matters here — matching against `e` determines everything. `mode` is the mode of `e`, which is
 used to fill the predicate hypotheses of the lemma. -/
-def rewriteWithCFCLemma (declName : Name) (symm srcOnLhs : Bool) (e : Expr) (mode : Mode) :
+def rewriteWithCFCLemma (declName : Name) (srcOnLhs : Bool) (e : Expr) (mode : Mode) :
     PullM (Expr × Expr) := do
   let ctx ← read
-  let (mvars, bis, lhs, rhs, proof) ← instantiateLemma declName symm
+  let (mvars, bis, lhs, rhs, proof) ← instantiateLemma declName
   let (srcSide, tgtSide) := if srcOnLhs then (lhs, rhs) else (rhs, lhs)
   let some cs := CFCApp.match? srcSide | throwError "`{declName}` is not a `cfc`-to-`cfc` lemma"
   -- Everything that decides whether this lemma applies *here* is a match against the user's
@@ -433,8 +433,8 @@ def rewriteWithCFCLemma (declName : Name) (symm srcOnLhs : Bool) (e : Expr) (mod
   return (newE, step)
 
 /-- Apply a transition lemma (a `Scalar` or `Unital` lemma) to a result. -/
-def applyTransition (declName : Name) (symm srcOnLhs : Bool) (res : Result) : PullM Result := do
-  let (newE, step) ← rewriteWithCFCLemma declName symm srcOnLhs res.rhs res.mode
+def applyTransition (declName : Name) (srcOnLhs : Bool) (res : Result) : PullM Result := do
+  let (newE, step) ← rewriteWithCFCLemma declName srcOnLhs res.rhs res.mode
   let some c := CFCApp.match? newE | throwError "`{declName}`: the result is not a `cfc`"
   return { mode := { ring := c.R, unital := c.unital }, fn := c.f, rhs := newE,
            proof := ← mkEqTrans res.proof step }
@@ -452,7 +452,7 @@ def convert (res : Result) (want : Mode) : PullM Result := do
       unless ← l.ring.matchesRing res.mode.ring do continue
       -- to reach the unital calculus we start from the non-unital side, and conversely
       let srcOnLhs := if want.unital then l.nonUnitalOnLhs else !l.nonUnitalOnLhs
-      if let some r ← observing? (applyTransition l.declName l.symm srcOnLhs res) then
+      if let some r ← observing? (applyTransition l.declName srcOnLhs res) then
         res := r; done := true; break
     unless done do
       throwError "`cfc_pull` could not convert {res.mode} into {want}"
@@ -460,7 +460,7 @@ def convert (res : Result) (want : Mode) : PullM Result := do
     let some path ← scalarPath (.ofExpr res.mode.ring) (.ofExpr want.ring) want.unital
       | throwError "`cfc_pull` has no way to convert a {res.mode} into a {want}"
     for l in path do
-      res ← applyTransition l.declName l.symm true res
+      res ← applyTransition l.declName true res
     unless ← withReducible <| isDefEq res.mode.ring want.ring do
       throwError "`cfc_pull` converted to {res.mode}, but {want} was requested"
   return res
@@ -475,7 +475,7 @@ not mention it (such as `cfc_const_one`) apply only at the right element. -/
 def applyPullLemma (l : PullLemma) (e : Expr) (want : Mode)
     (rec : Expr → Mode → PullM Result) : PullM Result := do
   let ctx ← read
-  let (mvars, bis, lhs, rhs, proof) ← instantiateLemma l.declName l.symm
+  let (mvars, bis, lhs, rhs, proof) ← instantiateLemma l.declName
   let (cfcSide, algSide) := if l.cfcOnLhs then (lhs, rhs) else (rhs, lhs)
   let some c := CFCApp.match? cfcSide | throwError "`{l.declName}` is not a pull lemma"
   unless ← withReducible <| isDefEq c.A ctx.alg do
@@ -539,7 +539,7 @@ def applyLooseLemma (l : PullLemma) (e : Expr) (want : Mode) : PullM (Expr × Ex
   let ctx ← read
   if l.numHoles != 0 then
     throwError "`{l.declName}` has holes, so it cannot be applied at an unknown element"
-  let (mvars, bis, lhs, rhs, proof) ← instantiateLemma l.declName l.symm
+  let (mvars, bis, lhs, rhs, proof) ← instantiateLemma l.declName
   let (cfcSide, algSide) := if l.cfcOnLhs then (lhs, rhs) else (rhs, lhs)
   let some c := CFCApp.match? cfcSide | throwError "`{l.declName}` is not a pull lemma"
   unless ← withReducible <| isDefEq c.A ctx.alg do
@@ -566,7 +566,6 @@ def applyLooseLemma (l : PullLemma) (e : Expr) (want : Mode) : PullM (Expr × Ex
 just a pull lemma whose algebraic side is the element and which therefore has no holes. -/
 def IdLemma.toPullLemma (l : IdLemma) : PullLemma where
   declName := l.declName
-  symm := l.symm
   prio := 1000
   ring := l.ring
   unital := l.unital
@@ -676,7 +675,7 @@ partial def pullExisting (c : CFCApp) (want : Mode) : PullM Result := do
       unless ← l.ring.matchesRing c.R do continue
       let srcOnLhs := if want.unital then l.nonUnitalOnLhs else !l.nonUnitalOnLhs
       let r ← observing? do
-        let (newE, step) ← rewriteWithCFCLemma l.declName l.symm srcOnLhs e mode
+        let (newE, step) ← rewriteWithCFCLemma l.declName srcOnLhs e mode
         let res ← pull newE want
         return { res with proof := ← mkEqTrans step res.proof }
       if let some r := r then return r
@@ -687,7 +686,7 @@ partial def pullExisting (c : CFCApp) (want : Mode) : PullM Result := do
     unless ← l.ring.matchesRing c.R do continue
     unless some l.innerHead == innerHead do continue
     let r ← observing? do
-      let (newE, step) ← rewriteWithCFCLemma l.declName l.symm l.srcOnLhs e mode
+      let (newE, step) ← rewriteWithCFCLemma l.declName l.srcOnLhs e mode
       let res ← pull newE want
       return { res with proof := ← mkEqTrans step res.proof }
     if let some r := r then return r
@@ -747,15 +746,18 @@ def mkMode (cfg : Config) (R alg : Expr) : MetaM Mode := do
   return { ring := R, unital := false }
 
 /-- Run the core of `cfc_pull` on `e`: returns the rewritten expression, a proof that `e` equals
-it, and the side goals that proof depends on. -/
-def runPull (cfg : Config) (R elem e : Expr) : MetaM (Expr × Expr × Array MVarId) := do
+it, and the side goals that proof depends on.
+
+`lemmas` is the set to pull with. It is passed in rather than read from the environment here
+because the bracketed lemma list of `cfc_pull` modifies it for the duration of one call. -/
+def runPull (cfg : Config) (lemmas : Lemmas) (R elem e : Expr) :
+    MetaM (Expr × Expr × Array MVarId) := do
   -- see the note in `cfcPullTarget`: nothing downstream looks through `mdata`
   let e := e.consumeMData
   let alg ← inferType elem
   unless ← isDefEq (← inferType e) alg do
     throwError "`cfc_pull`: `{e}` does not live in the algebra `{alg}`"
   let target ← mkMode cfg R alg
-  let lemmas ← getLemmas
   let ctx : Context := { cfg, elem, alg, target, lemmas }
   -- Compute the predicate up front, so that "there is no such functional calculus" is reported
   -- as itself rather than as a pile of failed lemma applications.

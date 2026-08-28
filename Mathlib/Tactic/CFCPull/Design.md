@@ -50,16 +50,16 @@ Lemma records:
 
 ```lean
 structure PullLemma where
-  declName : Name; symm : Bool; prio : Nat
+  declName : Name; prio : Nat
   ring : RingKey; unital : Bool
-  cfcOnLhs : Bool          -- after applying `symm`
+  cfcOnLhs : Bool
   numHoles : Nat
 
-structure IdLemma    where declName : Name; symm : Bool; ring : RingKey; unital : Bool
-structure ScalarLemma where declName : Name; symm : Bool; src tgt : RingKey; unital : Bool
-structure UnitalLemma where declName : Name; symm : Bool; ring : RingKey; nonUnitalOnLhs : Bool
+structure IdLemma    where declName : Name; ring : RingKey; unital : Bool
+structure ScalarLemma where declName : Name; src tgt : RingKey; unital : Bool
+structure UnitalLemma where declName : Name; ring : RingKey; nonUnitalOnLhs : Bool
 structure ComposeLemma where
-  declName : Name; symm : Bool; ring : RingKey; unital : Bool
+  declName : Name; ring : RingKey; unital : Bool
   srcOnLhs : Bool          -- which side has the structured element
   innerHead : Name         -- head symbol of that element
 ```
@@ -76,7 +76,7 @@ type and instance arguments become metavariables and are therefore indexed as `D
 wildcards (with `forallTelescope` they would be free variables and would be indexed as such,
 so no lemma would ever match), and "a variable of the lemma" becomes "an unassigned
 metavariable", which is exactly what the tactic sees when it later applies the lemma. Then
-`type.eq?`, apply `symm` if `←` was given, and dispatch on `CFCApp.match?` of the two sides as
+`type.eq?` and dispatch on `CFCApp.match?` of the two sides as
 the table in `Spec.md` §5 prescribes.
 
 `RingKey` of an expression `R`: `.const n` if `R`'s head is the constant `n`, `.any` otherwise
@@ -133,9 +133,9 @@ and the workers that apply a single tagged lemma:
 def applyPullLemma      (l : PullLemma) (e : Expr) (want : Mode)
                         (rec : Expr → Mode → PullM Result) : PullM Result
 def applyLooseLemma     (l : PullLemma) (e : Expr) (want : Mode) : PullM (Expr × Expr)
-def rewriteWithCFCLemma (declName : Name) (symm srcOnLhs : Bool) (e : Expr) (mode : Mode) :
+def rewriteWithCFCLemma (declName : Name) (srcOnLhs : Bool) (e : Expr) (mode : Mode) :
                           PullM (Expr × Expr)
-def applyTransition     (declName : Name) (symm srcOnLhs : Bool) (res : Result) : PullM Result
+def applyTransition     (declName : Name) (srcOnLhs : Bool) (res : Result) : PullM Result
 ```
 
 `rewriteWithCFCLemma` turned out to cover the `Scalar`, `Unital` *and* `Compose` categories at
@@ -248,6 +248,15 @@ Tactic mode:
   goal's kind, which is recovered from the name the goal was given), erroring on the survivors
   unless `+defer` was given. `+deferAll` stops after the deduplication and hands everything
   back — the deduplication is deliberately the first step, so that it is shared by both modes.
+
+The lemma list is elaborated before either of those: `getLemmas` reads the database, the list is
+applied to it (`Lemmas.addEntry` with an `Entry` built by the attribute's own `mkEntry`, or
+`Lemmas.erase`), and the result is passed to `runPull`, which no longer reads the environment
+itself. `Lemmas.erase` filters the four arrays and, since `DiscrTree` has no `erase`, maps
+`Array.filter` over the buckets of the `pull` tree; the keys of an emptied bucket stay behind and
+cost one lookup that returns nothing. Erasure is per-call only, so nothing has to be persisted
+and no `erased` set has to be consulted at match time — the alternative `simp` is obliged to
+take, its lemma set being an environment extension that has to survive `import`.
 
 Conv mode: `Conv.getLhs`, run `pull`, `Conv.updateLhs newLhs proof`, then append the side goals.
 `conv` refuses to end with any, so in practice they must all be discharged before the block ends,

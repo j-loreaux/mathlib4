@@ -143,11 +143,57 @@ def inferCFCApp (target : Expr) : MetaM CFCApp := do
     which to read off the scalar ring and the element; supply them explicitly, as in\n\
     `cfc_pull ℝ a`"
 
+/-! ### The lemma list -/
+
+/-- `-foo`: the entry of `cfc_pull`'s bracketed lemma list that removes every entry for `foo`
+from the set for this call. -/
+syntax cfcPullErase := "-" ident
+
+/-- `cfc_pull`'s bracketed lemma list, which adjusts the `@[cfc_pull]` set for one call. Each
+entry is either a declaration name, added to the set exactly as `@[cfc_pull]` would add it, or
+`-foo`, which takes `foo` out. -/
+syntax cfcPullLemmas := " [" withoutPosition((cfcPullErase <|> ident),*,?) "]"
+
+/-- Apply the bracketed lemma list to the `@[cfc_pull]` set, giving the set that this call will
+pull with. The database itself is untouched: there is no way to remove a lemma from it.
+
+Only global declarations may be named. A tagged lemma is instantiated from its constant — see
+`instantiateLemma` — so a local hypothesis has no place in the set; `rw` is the way to use one.
+An added lemma is classified exactly as the attribute would classify it (`mkEntry`), and so is
+read in the direction it is stated, rejected here for the same reasons, and given the default
+priority. -/
+def elabCFCPullLemmas (lemmas : Lemmas) (stx? : Option (TSyntax ``cfcPullLemmas)) :
+    TacticM Lemmas := do
+  let some stx := stx? | return lemmas
+  let mut lemmas := lemmas
+  for arg in stx.raw[1].getSepArgs do
+    if arg.isOfKind ``cfcPullErase then
+      let id : Ident := ⟨arg[1]⟩
+      let declName ← realizeGlobalConstNoOverloadWithInfo id
+      unless lemmas.contains declName do
+        throwErrorAt id "`{declName}` is not in the `cfc_pull` lemma set, so `-{id}` has \
+          nothing to remove"
+      lemmas := lemmas.erase declName
+    else
+      let id : Ident := ⟨arg⟩
+      -- a local hypothesis is the natural thing to try here, `simp` taking one; the "unknown
+      -- constant" that `realizeGlobalConstNoOverloadWithInfo` would report does not say why
+      if (← getLCtx).findFromUserName? id.getId |>.isSome then
+        throwErrorAt id "`{id}` is a local hypothesis, and `cfc_pull`'s lemma list takes \
+          declaration names only: a `@[cfc_pull]` lemma is instantiated from its constant, so \
+          there is nothing for a hypothesis to be. Rewrite with it first, as in `rw [{id}]`."
+      let declName ← realizeGlobalConstNoOverloadWithInfo id
+      -- `withRef` points a rejection, or a `warnBoundHoles` warning, at the offending name
+      let entry ← withRef id <| mkEntry declName (prio := eval_prio default)
+      lemmas := lemmas.addEntry entry
+  return lemmas
+
 /-! ### The tactic -/
 
 /-- Pull every argument of the target that lives in the algebra, and replace the goal by the
 result. Returns the new goal (unless it was closed by `rfl`) and the surviving side goals. -/
-def cfcPullTarget (cfg : Config) (R elem : Expr) (goal : MVarId) : TacticM Unit := do
+def cfcPullTarget (cfg : Config) (lemmas : Lemmas) (R elem : Expr) (goal : MVarId) :
+    TacticM Unit := do
   let alg ← inferType elem
   -- `consumeMData` is not optional: a goal type routinely arrives wrapped in an
   -- `mdata noImplicitLambda` annotation left by the elaborator, and `Expr.getAppArgs` does not
@@ -167,7 +213,7 @@ def cfcPullTarget (cfg : Config) (R elem : Expr) (goal : MVarId) : TacticM Unit 
     let mctx ← getMCtx
     let attempt : Except String (Expr × Expr × Array MVarId) ← (do
       try
-        return .ok (← runPull cfg R elem arg)
+        return .ok (← runPull cfg lemmas R elem arg)
       catch ex =>
         setMCtx mctx
         return .error (← ex.toMessageData.toString))
@@ -202,8 +248,9 @@ def cfcPullTarget (cfg : Config) (R elem : Expr) (goal : MVarId) : TacticM Unit 
   replaceMainGoal (main ++ (← postProcessSideGoals cfg sideGoals).toList)
 
 /-- Elaborate the optional scalar ring and element arguments, falling back to reading them off
-the goal. `preferUnital` reports whether the calculus found in the goal (if any) was unital, so
-that `cfc_pull` on a goal mentioning `cfcₙ` defaults to the non-unital calculus. -/
+the goal. An argument written `_` is treated as absent, which is the way to give the element
+without the ring. The `Option Bool` reports whether the calculus found in the goal (if any) was
+unital, so that `cfc_pull` on a goal mentioning `cfcₙ` defaults to the non-unital calculus. -/
 def elabRingAndElem (target : Expr) (ring? elem? : Option Term) :
     TacticM (Expr × Expr × Option Bool) := do
   /- The first explicit argument is the scalar ring.  Elaborating the element there is a natural
@@ -214,8 +261,10 @@ def elabRingAndElem (target : Expr) (ring? elem? : Option Term) :
     catch ex =>
       throwError "`cfc_pull`'s first argument is the scalar ring, but `{r}` did not elaborate \
         as a type:{indentD ex.toMessageData}\nIf `{r}` is the element to pull towards, give the \
-        scalar ring as well, as in `cfc_pull ℝ {r}`."
-  match ring?, elem? with
+        scalar ring too — or `_`, as in `cfc_pull _ {r}`."
+  -- `_` in either position asks for that argument to be inferred, exactly as omitting it does
+  let isHole (t : Term) : Bool := t.raw.isOfKind ``Lean.Parser.Term.hole
+  match ring?.filter (!isHole ·), elem?.filter (!isHole ·) with
   | some r, some a =>
     let R ← elabRing r
     let elem ← Term.elabTerm a none
@@ -226,8 +275,11 @@ def elabRingAndElem (target : Expr) (ring? elem? : Option Term) :
     Term.synthesizeSyntheticMVarsNoPostponing
     let c ← inferCFCApp target
     return (← instantiateMVars R, c.a, some c.unital)
-  | none, some _ =>
-    throwError "`cfc_pull`: the element may only be given together with the scalar ring"
+  | none, some a =>
+    let elem ← Term.elabTerm a none
+    Term.synthesizeSyntheticMVarsNoPostponing
+    let c ← inferCFCApp target
+    return (c.R, ← instantiateMVars elem, some c.unital)
   | none, none =>
     let c ← inferCFCApp target
     return (c.R, c.a, some c.unital)
@@ -247,7 +299,14 @@ example (ha : p a) : star a * a = cfc (fun x : R ↦ star x * x) a := by
 ```
 
 Both arguments are optional: `cfc_pull` on its own reads the scalar ring and the element off an
-application of `cfc`/`cfcₙ` already present in the goal, preferring the right-hand side.
+application of `cfc`/`cfcₙ` already present in the goal, preferring the right-hand side. Writing
+`_` for an argument asks for that one to be read off the goal, which is how to give the element
+and leave the ring to be inferred:
+
+```lean
+example (ha : p a) : star a * a = cfc (fun x : R ↦ star x * x) a := by
+  cfc_pull _ a <;> fun_prop
+```
 
 The lemmas used along the way have hypotheses — continuity of the functions on the spectrum,
 `f 0 = 0` in the non-unital case, and the predicate `p a` — and `cfc_pull` discharges them with
@@ -313,6 +372,8 @@ example : CFC.log a * CFC.log a + b = cfc (fun x : ℝ ↦ Real.log x * Real.log
     cfc_pull ℝ a => exact Real.continuousOn_log.mono fun x hx h ↦ ...
 ```
 
+The lemma list, if there is one, goes before the arguments and so before the `=> ..` block.
+
 The goals keep their kind tags inside the block, so `case cfc_pull.continuity => ..` works there
 as it does in tactic mode, and `+deferAll .. => all_goals tac` is the conv-mode counterpart of
 `cfc_pull +deferAll .. <;> tac`. The block is a `tacticSeq` and so is delimited by indentation:
@@ -328,7 +389,21 @@ example : ∑ i ∈ s, star (cfc (g i) a) = cfc (∑ i ∈ s, fun x ↦ star (g 
 ```
 
 The lemmas the tactic uses are those tagged `@[cfc_pull]`; `set_option trace.Tactic.cfc_pull
-true` shows which were tried and why they failed.
+true` shows which were tried and why they failed. A bracketed list adjusts that set for this one
+call: `foo` adds a lemma, exactly as `@[cfc_pull]` would, and `-foo` takes one out. It goes
+before the scalar ring and the element, where `simp`'s and `rw`'s lists go relative to their
+location.
+
+```lean
+example (ha : 0 ≤ a) : CFC.sqrt a * CFC.sqrt a = cfc (fun x : ℂ ↦ x.sqrt * x.sqrt) a := by
+  cfc_pull [CFC.sqrt_eq_cfc_complex_sqrt] ℂ a
+```
+
+That is the way to use a lemma too special — or too expensive in side goals — to be worth
+tagging globally, and the way to keep a tagged lemma out of the way of the one you want. Only
+declaration names may be listed: a `@[cfc_pull]` lemma is instantiated from its constant, so a
+local hypothesis cannot be one, and `rw` is the way to use it. The database itself is never
+modified: `-foo` says "do not use `foo` in this call".
 -/
 syntax (name := cfcPull) "cfc_pull"
   -- The config parser has to be `Lean.Parser.Tactic.optConfig`, not the
@@ -336,12 +411,15 @@ syntax (name := cfcPull) "cfc_pull"
   -- `disch`/`discharger` from the identifiers its `valConfigItem` accepts, and so only it
   -- leaves the clause that follows to be parsed. With the other one the configuration swallows
   -- `(disch := ..)` and reports it as an unknown configuration option.
-  Lean.Parser.Tactic.optConfig (Lean.Parser.Tactic.discharger)?
+  -- the lemma list comes before the positional arguments, as `simp`'s and `rw`'s do. Both of
+  -- those are optional, so with the list after them `cfc_pull [foo]` would read `[foo]` as the
+  -- scalar ring rather than as a lemma list.
+  Lean.Parser.Tactic.optConfig (Lean.Parser.Tactic.discharger)? (cfcPullLemmas)?
   (ppSpace colGt term:max)? (ppSpace colGt term:max)? : tactic
 
 @[inherit_doc cfcPull]
 syntax (name := cfcPullConv) "cfc_pull"
-  Lean.Parser.Tactic.optConfig (Lean.Parser.Tactic.discharger)?
+  Lean.Parser.Tactic.optConfig (Lean.Parser.Tactic.discharger)? (cfcPullLemmas)?
   (ppSpace colGt term:max)? (ppSpace colGt term:max)?
   (" => " tacticSeq)? : conv
 
@@ -369,19 +447,22 @@ def mkConfig (cfgStx : TSyntax ``Lean.Parser.Tactic.optConfig)
 /-- Elaborator for the `cfc_pull` tactic. -/
 @[tactic cfcPull]
 def evalCFCPull : Tactic := fun stx => withMainContext do
-  let `(tactic| cfc_pull $cfg:optConfig $[$disch?]? $[$ring?]? $[$elem?]?) := stx
+  let `(tactic| cfc_pull $cfg:optConfig $[$disch?]? $[$lems?]? $[$ring?]? $[$elem?]?) := stx
     | throwUnsupportedSyntax
   let goal ← getMainGoal
   let target := (← instantiateMVars (← goal.getType)).consumeMData
+  let lemmas ← elabCFCPullLemmas (← getLemmas) lems?
   let (R, elem, goalUnital) ← elabRingAndElem target ring? elem?
-  cfcPullTarget (← mkConfig cfg disch? goalUnital) R elem goal
+  cfcPullTarget (← mkConfig cfg disch? goalUnital) lemmas R elem goal
 
 /-- Elaborator for `cfc_pull` in `conv` mode. -/
 @[tactic cfcPullConv]
 def evalCFCPullConv : Tactic := fun stx => withMainContext do
-  let `(conv| cfc_pull $cfg:optConfig $[$disch?]? $[$ring?]? $[$elem?]? $[=> $tac?]?) := stx
+  let `(conv| cfc_pull $cfg:optConfig $[$disch?]? $[$lems?]? $[$ring?]? $[$elem?]?
+      $[=> $tac?]?) := stx
     | throwUnsupportedSyntax
   let lhs := (← Conv.getLhs).consumeMData
+  let lemmas ← elabCFCPullLemmas (← getLemmas) lems?
   let (R, elem, goalUnital) ← elabRingAndElem lhs ring? elem?
   let mut cfg ← mkConfig cfg disch? goalUnital
   /- A `=> tac` block is what disposes of the survivors, so `postProcessSideGoals` must hand
@@ -389,7 +470,7 @@ def evalCFCPullConv : Tactic := fun stx => withMainContext do
   the auto-param tactics still run, and the block sees only what they left, exactly as the
   tactic after `cfc_pull +defer ..` does in tactic mode. -/
   if tac?.isSome then cfg := { cfg with defer := true }
-  let (newLhs, proof, sideGoals) ← runPull cfg R elem lhs
+  let (newLhs, proof, sideGoals) ← runPull cfg lemmas R elem lhs
   Conv.updateLhs newLhs proof
   let sideGoals ← postProcessSideGoals cfg sideGoals
   let some tac := tac? | replaceMainGoal ((← getGoals) ++ sideGoals.toList)
