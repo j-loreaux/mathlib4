@@ -6,11 +6,13 @@ Authors: Jireh Loreaux
 module
 
 public import Mathlib.Tactic.CFCPull
+public import Mathlib.Analysis.Complex.SqrtDeriv
 public import Mathlib.Analysis.CStarAlgebra.Classes
 public import Mathlib.Analysis.CStarAlgebra.ContinuousFunctionalCalculus.Isometric
 public import Mathlib.Analysis.CStarAlgebra.ContinuousFunctionalCalculus.Order
 public import Mathlib.Analysis.CStarAlgebra.ContinuousFunctionalCalculus.RealImaginaryPart
 public import Mathlib.Analysis.Matrix.HermitianFunctionalCalculus
+public import Mathlib.Analysis.RCLike.Sqrt
 public import Mathlib.Analysis.SpecialFunctions.ContinuousFunctionalCalculus.Abs
 public import Mathlib.Analysis.SpecialFunctions.ContinuousFunctionalCalculus.ExpLog.Basic
 public import Mathlib.Analysis.SpecialFunctions.ContinuousFunctionalCalculus.PosPart.Basic
@@ -530,11 +532,77 @@ section InTheWild
 
 /- Goals of this shape have appeared in Mathlib. -/
 
+open Complex
+open scoped NNReal CStarAlgebra
+
+section NonUnital
+
+variable {A : Type*} [CStarAlgebra A] {a : A}
+
+example : ((star a * a) * (1 - star a * a) ^ 2 : A⁺¹) =
+    cfc (fun x : ℝ => x * (1 - x) ^ 2) (star a * a : A⁺¹) := by
+  cfc_pull ℝ (star a * a : A⁺¹)
+
+example : ((star a * a) * (1 - star a * a) ^ 2 : A⁺¹) =
+    cfc (fun x : ℂ => x * (1 - x) ^ 2) (star a * a : A⁺¹) := by
+  cfc_pull ℂ (star a * a : A⁺¹)
+
+-- these attributes should be moved to the declarations themselves.
+attribute [cfc_pull] cfc_complex_eq_real cfcₙ_complex_eq_real cfc_real_eq_nnreal cfcₙ_real_eq_nnreal
+
+-- this is a bit of a weird example because it pulls towards `ℝ` rather than `ℂ`.
+example : ((star a * a) * (1 - star a * a) ^ 2 : A⁺¹) =
+    cfc (fun x : ℂ => x * (1 - x) ^ 2) (star a * a : A⁺¹) := by
+  cfc_pull +defer ℝ (star a * a : A⁺¹)
+  case cfc_pull.side =>
+    rw [← IsSelfAdjoint.spectrumRestricts (by cfc_tac) |>.algebraMap_image]
+    simp
+  norm_cast
+
+end NonUnital
+
 variable {A : Type*} [CStarAlgebra A] [PartialOrder A] [StarOrderedRing A]
 variable {a : A}
 
-open Complex
-open scoped NNReal
+-- this should be moved and generalized
+-- both this lemma and the unital version of it below should *not* be marked `cfc_pull` by default.
+-- This is because they will frequently generate annoying continuity side goals that are hard to
+-- solve since `Complex.sqrt` is not globally continuous.
+-- nevertheless, we should have a method of *temporarily* adding or removing `cfc_pull` lemmas to
+-- the set of lemmas used by `cfc_pull`
+
+open scoped NNReal in
+lemma CFC.sqrt_eq_cfcₙ_complex_sqrt {A : Type*} [NonUnitalCStarAlgebra A] [PartialOrder A]
+    [StarOrderedRing A] {a : A} (ha : 0 ≤ a) :
+    CFC.sqrt a = cfcₙ (fun x : ℂ ↦ x.sqrt) a := by
+  cfc_pull
+  refine cfcₙ_congr ?_
+  rw [← (ha.isSelfAdjoint.quasispectrumRestricts.comp rfl (.nnreal_of_nonneg ha)).algebraMap_image]
+  rintro - ⟨x, hx, rfl⟩
+  rw [IsScalarTower.algebraMap_apply ℝ≥0 ℝ ℂ]
+  aesop (add simp [Complex.sqrt_of_nonneg])
+
+lemma Complex.continuousOn_sqrt_setOf_re_nonneg : ContinuousOn Complex.sqrt {z | 0 ≤ z.re} :=
+  fun _z hz ↦ continuousAt_sqrt (.inl hz) |>.continuousWithinAt
+
+-- this should be generalized.
+@[fun_prop]
+lemma Complex.continuousOn_sqrt_quasispectrum {A : Type*} [CStarAlgebra A] [PartialOrder A]
+    [StarOrderedRing A] {a : A} (ha : 0 ≤ a) :
+    ContinuousOn Complex.sqrt (quasispectrum ℂ a) := by
+  refine Complex.continuousOn_sqrt_setOf_re_nonneg.mono ?_
+  rw [← ha.isSelfAdjoint.quasispectrumRestricts.algebraMap_image]
+  rintro - ⟨x, hx, rfl⟩
+  simp
+  grind
+
+lemma CFC.sqrt_eq_cfc_complex_sqrt {A : Type*} [CStarAlgebra A] [PartialOrder A]
+    [StarOrderedRing A] {a : A} (ha : 0 ≤ a) :
+    CFC.sqrt a = cfc (fun x : ℂ ↦ x.sqrt) a := by
+  sorry
+  -- here is where we would like to be able to temporarily add `CFC.sqrt_eq_cfcₙ_complex_sqrt` to
+  -- the set of `cfc_pull` lemmas. If we could do that, then this would work:
+  -- `cfc_pull -unital ℂ a [CFC.sqrt_eq_cfcₙ_complex_sqrt]`
 
 example (ha : IsSelfAdjoint a) :
     a + I • cfcₙ Real.sqrt (1 - a ^ 2) = cfc (fun x ↦ x + I * ↑√(1 - x.re ^ 2)) a := by
