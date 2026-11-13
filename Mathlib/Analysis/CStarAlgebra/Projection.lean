@@ -88,6 +88,52 @@ end Unital
 
 namespace IsStarProjection
 
+section IsProperStar
+
+variable {R : Type*} [NonUnitalRing R] [StarRing R] [PartialOrder R] [StarOrderedRing R]
+  [IsProperStar R] {p q : R}
+
+lemma le_tfae_of_isProperStar (hp : IsStarProjection p) (hq : IsStarProjection q) :
+  List.TFAE
+    [p ≤ q,
+    q * p = p,
+    p * q = p,
+    IsStarProjection (q - p),
+    IsIdempotentElem (q - p),
+    q * p * q = p,
+    p * q * p = p,
+    p ⋆⟂ (q - p)] := by
+  have h₂₃ (h : q * p = p) : p * q = p := by
+    simpa [hp.isSelfAdjoint.star_eq, hq.isSelfAdjoint.star_eq] using congr(star $h)
+  tfae_have 1 → 7 := fun h ↦ by
+    refine le_antisymm ?_ ?_
+    · rw [← sub_nonneg]
+      convert star_mul_self_nonneg (p - q * p) using 1
+      simp [hp.isSelfAdjoint.star_eq, hq.isSelfAdjoint.star_eq, mul_sub, sub_mul, ← mul_assoc,
+        hp.isIdempotentElem.eq, hq.isIdempotentElem.mul_mul_self]
+    · simpa [hp.isIdempotentElem.mul_mul_self, hp.isIdempotentElem.eq] using
+        hp.isSelfAdjoint.conjugate_le_conjugate h
+  tfae_have 2 → 3 := h₂₃
+  tfae_have 3 → 2 := fun h ↦ by
+    simpa [hp.isSelfAdjoint.star_eq, hq.isSelfAdjoint.star_eq] using congr(star $h)
+  tfae_have 3 → 4 := hp.sub_of_mul_eq_left hq
+  tfae_have 4 → 1 := fun h ↦ by simpa using h.nonneg
+  tfae_have 4 ↔ 5 := by simp [isStarProjection_iff, hq.isSelfAdjoint.sub hp.isSelfAdjoint]
+  tfae_have 2 → 6 := fun h ↦ by rw [h, h₂₃ h]
+  tfae_have 6 → 2 := fun h ↦ by
+    rw [← h, ← mul_assoc, ← mul_assoc, hq.isIdempotentElem.eq]
+  tfae_have 3 → 7 := fun h ↦ by rw [h, hp.isIdempotentElem.eq]
+  tfae_have 7 → 3 := fun h ↦ by
+    rw [← sub_eq_zero, ← mul_star_self_eq_zero]
+    simp [hp.isSelfAdjoint.star_eq, hq.isSelfAdjoint.star_eq, mul_sub, sub_mul, ← mul_assoc,
+      hp.isIdempotentElem.eq, hq.isIdempotentElem.mul_mul_self, h]
+  tfae_have 3 ↔ 8 := by
+    rw [hp.isSelfAdjoint.isStarOrtho_iff_mul_eq_zero (hq.isSelfAdjoint.sub hp.isSelfAdjoint),
+      mul_sub, hp.isIdempotentElem.eq, sub_eq_zero]
+  tfae_finish
+
+end IsProperStar
+
 variable {A : Type*} [NonUnitalCStarAlgebra A] [PartialOrder A] [StarOrderedRing A] {p q : A}
 
 open CFC in
