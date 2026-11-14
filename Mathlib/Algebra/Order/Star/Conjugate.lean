@@ -92,6 +92,15 @@ lemma conjUnitsOrderIso_apply_symm_apply (r : Rˣ) (a : R) :
     (conjUnitsOrderIso r).symm a = r⁻¹ * a * star (↑r⁻¹ : R) :=
   rfl
 
+protected theorem _root_.IsUnit.star_right_conjugate_le_conjugate {a b c : R} (hc : IsUnit c) :
+    c * a * star c ≤ c * b * star c ↔ a ≤ b := by
+  lift c to Rˣ using hc
+  exact (conjUnitsOrderIso c).map_rel_iff
+
+protected theorem _root_.IsUnit.star_left_conjugate_le_conjugate {a b c : R} (hc : IsUnit c) :
+    star c * a * c ≤ star c * b * c ↔ a ≤ b := by
+  simpa using hc.star.star_right_conjugate_le_conjugate
+
 lemma _root_.IsLUB.conjugate_star_right_of_isUnit {s : Set R} {x : R}
     (h : IsLUB s x) {r : R} (hr : IsUnit r) :
     IsLUB ((r * · * star r) '' s) (r * x * star r) := by
