@@ -443,8 +443,7 @@ lemma norm_le_norm_of_le_of_nonneg {a b : A} (hab : a ≤ b) (ha : 0 ≤ a := by
     ‖a‖ ≤ ‖b‖ := by
   suffices ∀ a b : A⁺¹, 0 ≤ a → a ≤ b → ‖a‖ ≤ ‖b‖ by
     have hb := ha.trans hab
-    simpa only [ge_iff_le, Unitization.norm_inr] using
-      this a b (by sorry) (by simp only [PartialOrder.ofAddSubmonoid_le_iff])
+    simpa only [ge_iff_le, Unitization.norm_inr] using this a b (by simpa) (by simpa)
   intro a b ha hab
   have hb : 0 ≤ b := ha.trans hab
   exact (norm_le_iff_le_algebraMap a (norm_nonneg _) ha).2 <| hab.trans <|
@@ -466,7 +465,7 @@ alias nnnorm_le_nnnorm_of_nonneg_of_le := nnNorm_le_nnNorm_of_le_of_nonneg
 lemma star_left_conjugate_le_norm_smul (a b : A) (hb : IsSelfAdjoint b := by cfc_tac) :
     star a * b * a ≤ ‖b‖ • (star a * a) := by
   suffices ∀ a b : A⁺¹, IsSelfAdjoint b → star a * b * a ≤ ‖b‖ • (star a * a) by
-    rw [← Unitization.inr_le_inr_iff]
+    rw [← Unitization.inr_le_inr_iff (R := ℂ)]
     simpa [Unitization.norm_inr] using this a b <| hb.inr ℂ
   intro a b hb
   calc
@@ -576,7 +575,7 @@ open Unitization Set Metric
 lemma inr_mem_Icc_iff_norm_le {x : A} :
     (x : A⁺¹) ∈ Icc 0 1 ↔ 0 ≤ x ∧ ‖x‖ ≤ 1 := by
   simp only [mem_Icc, inr_nonneg_iff, and_congr_right_iff]
-  rw [← norm_inr (𝕜 := ℂ), ← inr_nonneg_iff, iff_comm]
+  rw [← norm_inr (𝕜 := ℂ), ← inr_nonneg_iff (R := ℂ), iff_comm]
   exact (norm_le_one_iff_of_nonneg _ ·)
 
 lemma inr_mem_Icc_iff_nnNorm_le {x : A} :
