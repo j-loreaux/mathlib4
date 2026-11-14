@@ -18,7 +18,7 @@ This file contains results on the extreme points of the closed unit ball in (uni
 
 public section
 
-open Set Metric CStarAlgebra Unitization
+open Set Metric CStarAlgebra Unitization ComplexOrder
 
 variable {A : Type*} [NonUnitalCStarAlgebra A]
 
@@ -72,7 +72,7 @@ theorem isStarProjection_iff_mem_extremePoints_setOfPred_nonneg_inter_unitClosed
     Then using the extremity of `e`, we get `e * e = e` since `e * e` is obviously in the
     nonnegative closed unit ball, and `e = 2⁻¹ • e * e + 2⁻¹ • (2 • e - e * e)`. -/
     have : 0 ≤ (2 : ℝ) • e - e * e := by
-      have : e * e ≤ e := le_of_inr <| by
+      have : e * e ≤ e := le_of_inr (R := ℂ) <| by
         simpa using mul_self_le_of_nonneg_of_norm_le_one h1.inr (by simpa [norm_inr])
       simpa [two_smul] using le_add_of_nonneg_of_le h1 this
     refine ⟨h3 _ (Commute.mul_nonneg h1 h1 rfl) ?_ ((2 : ℝ) • e - e * e) this ?_
