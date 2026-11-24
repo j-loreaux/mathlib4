@@ -25,6 +25,8 @@ public import Mathlib.Tactic.Bound.Attribute
 public import Mathlib.Tactic.Bound.Init
 public import Mathlib.Tactic.ByCases
 public import Mathlib.Tactic.ByContra
+public import Mathlib.Tactic.CFCPull.Attr
+public import Mathlib.Tactic.CFCPull.Core
 public import Mathlib.Tactic.CancelDenoms
 public import Mathlib.Tactic.CancelDenoms.Core
 public import Mathlib.Tactic.Cases
@@ -157,6 +159,7 @@ public import Mathlib.Tactic.GRewrite
 public import Mathlib.Tactic.GRewrite.Core
 public import Mathlib.Tactic.GRewrite.Elab
 public import Mathlib.Tactic.Generalize
+public import Mathlib.Tactic.GoalToHave
 public import Mathlib.Tactic.GrindAttrs
 public import Mathlib.Tactic.Group
 public import Mathlib.Tactic.GuardGoalNums
@@ -362,6 +365,7 @@ public import Mathlib.Tactic.Set
 public import Mathlib.Tactic.SetLike
 public import Mathlib.Tactic.SetNotationForOrder
 public import Mathlib.Tactic.Setm
+public import Mathlib.Tactic.SideGoalSimp
 public import Mathlib.Tactic.SimpIntro
 public import Mathlib.Tactic.SimpLibraryNote
 public import Mathlib.Tactic.SimpRw

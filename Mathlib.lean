@@ -2436,6 +2436,9 @@ public import Mathlib.Analysis.SpecialFunctions.Complex.Log
 public import Mathlib.Analysis.SpecialFunctions.Complex.LogBounds
 public import Mathlib.Analysis.SpecialFunctions.Complex.LogDeriv
 public import Mathlib.Analysis.SpecialFunctions.ContinuousFunctionalCalculus.Abs
+public import Mathlib.Analysis.SpecialFunctions.ContinuousFunctionalCalculus.CFCPull.ComplexSqrt
+public import Mathlib.Analysis.SpecialFunctions.ContinuousFunctionalCalculus.CFCPull.Lemmas
+public import Mathlib.Analysis.SpecialFunctions.ContinuousFunctionalCalculus.CFCPull.Tags
 public import Mathlib.Analysis.SpecialFunctions.ContinuousFunctionalCalculus.ExpLog.Basic
 public import Mathlib.Analysis.SpecialFunctions.ContinuousFunctionalCalculus.ExpLog.Order
 public import Mathlib.Analysis.SpecialFunctions.ContinuousFunctionalCalculus.PosPart.Basic
@@ -5149,6 +5152,7 @@ public import Mathlib.Lean.ContextInfo
 public meta import Mathlib.Lean.CoreM
 public meta import Mathlib.Lean.Elab.InfoTree
 public import Mathlib.Lean.Elab.Tactic.Basic
+public import Mathlib.Lean.Elab.Tactic.FocusGoals
 public import Mathlib.Lean.Elab.Tactic.Meta
 public import Mathlib.Lean.Elab.Term
 public meta import Mathlib.Lean.EnvExtension
@@ -7589,6 +7593,8 @@ public import Mathlib.Tactic.Bound.Attribute
 public import Mathlib.Tactic.Bound.Init
 public import Mathlib.Tactic.ByCases
 public import Mathlib.Tactic.ByContra
+public import Mathlib.Tactic.CFCPull.Attr
+public import Mathlib.Tactic.CFCPull.Core
 public import Mathlib.Tactic.CancelDenoms
 public import Mathlib.Tactic.CancelDenoms.Core
 public import Mathlib.Tactic.Cases
@@ -7721,6 +7727,7 @@ public import Mathlib.Tactic.GRewrite
 public import Mathlib.Tactic.GRewrite.Core
 public import Mathlib.Tactic.GRewrite.Elab
 public import Mathlib.Tactic.Generalize
+public import Mathlib.Tactic.GoalToHave
 public import Mathlib.Tactic.GrindAttrs
 public import Mathlib.Tactic.Group
 public import Mathlib.Tactic.GuardGoalNums
@@ -7926,6 +7933,7 @@ public import Mathlib.Tactic.Set
 public import Mathlib.Tactic.SetLike
 public import Mathlib.Tactic.SetNotationForOrder
 public import Mathlib.Tactic.Setm
+public import Mathlib.Tactic.SideGoalSimp
 public import Mathlib.Tactic.SimpIntro
 public import Mathlib.Tactic.SimpLibraryNote
 public import Mathlib.Tactic.SimpRw
