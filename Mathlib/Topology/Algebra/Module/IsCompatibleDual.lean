@@ -29,7 +29,7 @@ the inverse (i.e., the map `StrongDual 𝕜 E →ₗ[𝕜] F`). This avoids enti
 diamonds (e.g., `B.IsCompatibleDual` and `B.flip.flip.IsCompatibleDual`).
 -/
 
-@[expose] public section
+public section
 
 namespace LinearMap
 
@@ -72,7 +72,7 @@ lemma continuous_eval (y : F) : Continuous (B · y) := by
 /-- Linear equivalence of `F` with `StrongDual 𝕜 E` obtained from `B.IsCompatibleDual`
 This has a non-computable inverse via `LinearEquiv.ofBijective`. In type-specific cases, it
 is preferred to use an existing equivalence. -/
-noncomputable def equiv : F ≃ₗ[𝕜] StrongDual 𝕜 E :=
+@[expose] noncomputable def equiv : F ≃ₗ[𝕜] StrongDual 𝕜 E :=
   .ofBijective
     { toFun y := ⟨B.flip y, continuous_eval B y⟩
       map_add' _ _ := ContinuousLinearMap.ext fun x ↦ map_add (B x) _ _
