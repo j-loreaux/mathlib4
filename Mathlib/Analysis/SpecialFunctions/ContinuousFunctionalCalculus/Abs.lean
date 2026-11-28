@@ -63,6 +63,22 @@ lemma abs_zero : abs (0 : A) = 0 := by
 (see `CFC.continuous_halfAbsAddSelf`). -/
 noncomputable def halfAbsAddSelf (a : A) : A := (2 : ℝ)⁻¹ • (abs a + a)
 
+lemma halfAbsAddSelf_def (a : A) : halfAbsAddSelf a = (2 : ℝ)⁻¹ • (abs a + a) := rfl
+
+@[simp, grind =]
+lemma halfAbsAddSelf_zero : halfAbsAddSelf (0 : A) = 0 := by
+  simp [halfAbsAddSelf_def]
+
+lemma halfAbsAddSelf_add_halfAbsAddSelf_neg (a : A) :
+    halfAbsAddSelf a + halfAbsAddSelf (-a) = abs a := by
+  simp only [halfAbsAddSelf_def, abs_neg]
+  module
+
+lemma halfAbsAddSelf_sub_halfAbsAddSelf_neg (a : A) :
+    halfAbsAddSelf a - halfAbsAddSelf (-a) = a := by
+  simp only [halfAbsAddSelf_def, abs_neg]
+  module
+
 variable [IsTopologicalRing A] [T2Space A]
 
 lemma abs_mul_abs (a : A) : abs a * abs a = star a * a :=
@@ -151,6 +167,11 @@ lemma halfAbsAddSelf_eq_posPart (a : A) (ha : IsSelfAdjoint a := by cfc_tac) :
     halfAbsAddSelf a = a⁺ := by
   rw [halfAbsAddSelf, abs_add_self a, ← ofNat_smul_eq_nsmul ℝ, smul_smul]
   norm_num
+
+@[grind =]
+lemma halfAbsAddSelf_neg_eq_negPart (a : A) (ha : IsSelfAdjoint a := by cfc_tac) :
+    halfAbsAddSelf (-a) = a⁻ := by
+  rw [halfAbsAddSelf_eq_posPart _, posPart_neg]
 
 @[simp, grind =]
 lemma cfcAbs_cfcAbs (a : A) : abs (abs a) = abs a := abs_of_nonneg ..

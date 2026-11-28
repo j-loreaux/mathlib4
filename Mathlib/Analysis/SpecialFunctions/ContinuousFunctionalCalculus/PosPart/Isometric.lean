@@ -5,6 +5,7 @@ Authors: Jireh Loreaux
 -/
 module
 
+public import Mathlib.Analysis.CStarAlgebra.ContinuousFunctionalCalculus.Continuity
 public import Mathlib.Analysis.CStarAlgebra.ContinuousFunctionalCalculus.Isometric
 public import Mathlib.Analysis.SpecialFunctions.ContinuousFunctionalCalculus.PosPart.Basic
 
@@ -54,3 +55,17 @@ lemma IsSelfAdjoint.norm_eq_max_norm_posPart_negPart (a : A) (ha : IsSelfAdjoint
   · apply le_max_of_le_right
     refine le_of_eq_of_le ?_ <| norm_apply_le_norm_cfcₙ _ a hx
     rw [negPart_eq_neg.mpr hx', norm_neg]
+
+variable [ContinuousStar A] [CompleteSpace A]
+
+@[fun_prop]
+lemma continuousOn_posPart : ContinuousOn (·⁺ : A → A) {a | IsSelfAdjoint a} := by
+  have := ContinuousOn.cfcₙ_of_mem_nhdsSet (s := Set.univ) ((·⁺) : ℝ → ℝ)
+    (a := id) (t := {a : A | IsSelfAdjoint a}) (by simp) (by fun_prop)
+  simpa
+
+@[fun_prop]
+lemma continuousOn_negPart : ContinuousOn (·⁻ : A → A) {a | IsSelfAdjoint a} := by
+  have := ContinuousOn.cfcₙ_of_mem_nhdsSet (s := Set.univ) ((·⁻) : ℝ → ℝ)
+    (a := id) (t := {a : A | IsSelfAdjoint a}) (by simp) (by fun_prop)
+  simpa
