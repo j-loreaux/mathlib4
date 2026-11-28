@@ -106,7 +106,7 @@ instance : (topDualPairing 𝕜 E).flip.IsCompatibleDual :=
   .of_linearEquiv _ (.refl 𝕜 _) fun _ _ ↦ rfl
 
 @[simp]
-lemma IsCompatibleDual.equiv_topDualPairing_flip :
+lemma IsCompatibleDual.equiv_flip_topDualPairing :
     equiv (topDualPairing 𝕜 E).flip = .refl 𝕜 _ :=
   equiv_eq _ _ fun _ _ ↦ rfl
 
