@@ -95,6 +95,8 @@ protected lemma separatingRight : B.SeparatingRight := fun y hy ↦
 lemma equiv_eq (e : F ≃ₗ[𝕜] StrongDual 𝕜 E) (he : ∀ x y, e y x = B x y) : equiv B = e :=
   LinearEquiv.ext fun y ↦ ContinuousLinearMap.ext fun x ↦ (he x y).symm
 
+instance : B.flip.flip.IsCompatibleDual := hB
+
 end IsCompatibleDual
 
 lemma isCompatibleDual_iff_exists_linearEquiv (B : E →ₗ[𝕜] F →ₗ[𝕜] 𝕜) :
